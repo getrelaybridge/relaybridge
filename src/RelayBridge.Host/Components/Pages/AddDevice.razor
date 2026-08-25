@@ -1,0 +1,374 @@
+@* SPDX-License-Identifier: MPL-2.0 *@
+
+@page "/devices/add"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@using Microsoft.Data.Sqlite
+@using Microsoft.AspNetCore.Components.Routing
+@using RelayBridge.Core.Devices
+@using RelayBridge.Core.Microsoft
+@using RelayBridge.Host.Services
+@using RelayBridge.Infrastructure.Microsoft
+@using RelayBridge.Infrastructure.Smtp
+@using RelayBridge.Infrastructure.Storage
+@inject DeviceService Devices
+@inject RelayDatabase Database
+@inject DeviceEndpointAdvisor Endpoints
+@inject MicrosoftIdentityRuntimeState MicrosoftIdentity
+@inject ExchangeDeliveryRuntimeState ExchangeDelivery
+@inject NavigationManager Navigation
+@inject IJSRuntime JavaScript
+
+<PageTitle>Add device · RelayBridge</PageTitle>
+
+<NavigationLock ConfirmExternalNavigation="@HasUnacknowledgedPassword" OnBeforeInternalNavigation="ProtectOneTimePassword" />
+
+<div class="device-wizard">
+    <nav class="compact-progress" aria-label="Device setup progress">
+        @foreach (var item in Steps)
+        {
+            <span class="@(_step == item.Number ? "current" : _step > item.Number ? "complete" : null)" aria-current="@(_step == item.Number ? "step" : null)">
+                <b aria-hidden="true">@(_step > item.Number ? "✓" : item.Number)</b>@item.Label
+            </span>
+        }
+    </nav>
+
+    <section class="wizard-card" aria-live="polite">
+        @if (!string.IsNullOrWhiteSpace(_notice))
+        {
+            <div class="notice @(_error ? "error" : "success")" role="@(_error ? "alert" : "status")">@_notice</div>
+        }
+
+        @switch (_step)
+        {
+            case 1:
+                <p class="eyebrow">Device name</p>
+                <h1>What should we call this device?</h1>
+                <p class="lead">Use the name technicians will recognize.</p>
+                <label for="device-name">Device name</label>
+                <input id="device-name" maxlength="100" autocomplete="off" placeholder="Ricoh Reception" @bind="_name" />
+                <label for="device-description">Description <span class="optional">Optional</span></label>
+                <input id="device-description" maxlength="500" autocomplete="off" placeholder="Reception copier" @bind="_description" />
+                <div class="actions"><button class="button primary" @onclick="ContinueFromName">Continue</button><a class="button secondary" href="/devices">Cancel</a></div>
+                break;
+
+            case 2:
+                <p class="eyebrow">Printer capabilities</p>
+                <h1>Does this device support SMTP authentication?</h1>
+                <fieldset>
+                    <legend class="visually-hidden">SMTP authentication support</legend>
+                    <label class="choice-card"><input type="radio" name="auth-support" checked="@(_authentication == AuthenticationChoice.Yes)" @onchange="() => _authentication = AuthenticationChoice.Yes" /><span><strong>Yes</strong><small>Recommended. RelayBridge generates a username and password.</small></span></label>
+                    <label class="choice-card"><input type="radio" name="auth-support" checked="@(_authentication == AuthenticationChoice.No)" @onchange="() => _authentication = AuthenticationChoice.No" /><span><strong>No</strong><small>Use strict network and sender restrictions for a legacy device.</small></span></label>
+                    <label class="choice-card"><input type="radio" name="auth-support" checked="@(_authentication == AuthenticationChoice.NotSure)" @onchange="() => _authentication = AuthenticationChoice.NotSure" /><span><strong>I'm not sure</strong><small>Check the printer's Email or SMTP settings before choosing a security mode.</small></span></label>
+                </fieldset>
+                @if (_authentication == AuthenticationChoice.NotSure)
+                {
+                    <div class="capability-note">
+                        <strong>Check the printer for SMTP authentication</strong>
+                        <p>Look for SMTP authentication and username/password fields. Authenticated mode is recommended when the printer supports it. RelayBridge will not silently choose Legacy mode.</p>
+                        <div class="actions"><button class="button primary" @onclick="() => ChooseAuthentication(AuthenticationChoice.Yes)">My printer supports authentication</button><button class="button secondary" @onclick="() => ChooseAuthentication(AuthenticationChoice.No)">My printer does not support authentication</button></div>
+                    </div>
+                }
+                <div class="capability-note">
+                    <strong>Connection security</strong>
+                    <p>Inbound STARTTLS is not available in this release. Use RelayBridge only on a trusted private network. Authenticated devices use SMTP authentication plus IP and sender restrictions.</p>
+                </div>
+                <div class="actions"><button class="button primary" @onclick="ContinueFromSecurity">Continue</button><button class="button secondary" @onclick="() => _step--">Back</button></div>
+                break;
+
+            case 3:
+                <p class="eyebrow">Network restriction</p>
+                <h1>Where will this device connect from?</h1>
+                <p class="lead">RelayBridge accepts this device only from the address below.</p>
+                <label for="device-network">Printer or device IP address</label>
+                <input id="device-network" autocomplete="off" inputmode="decimal" placeholder="192.168.10.31" @bind="_network" />
+                <details class="technical-details">
+                    <summary>Allow a subnet instead</summary>
+                    <p>Advanced administrators may enter a private CIDR network such as <code>192.168.10.0/24</code>. Catch-all networks are always rejected.</p>
+                </details>
+                @if (_authentication != AuthenticationChoice.Yes)
+                {
+                    <div class="warning-panel"><strong>Legacy device</strong><p>This device cannot authenticate. Anyone using its allowed network address could attempt to submit mail as this device. Use a dedicated IP on a trusted private LAN.</p></div>
+                }
+                <div class="actions"><button class="button primary" @onclick="ContinueFromNetwork">Review</button><button class="button secondary" @onclick="() => _step--">Back</button></div>
+                break;
+
+            case 4:
+                <p class="eyebrow">Review</p>
+                <h1>@_name</h1>
+                <dl class="review-list">
+                    <div><dt>Security</dt><dd>@SecuritySummary</dd></div>
+                    <div><dt>Device network</dt><dd>@NormalizedNetwork</dd></div>
+                    <div><dt>Sender</dt><dd>@(_sender ?? "Microsoft 365 not configured")</dd></div>
+                    @if (_authentication == AuthenticationChoice.Yes)
+                    {
+                        <div><dt>RelayBridge will generate</dt><dd>SMTP username and one-time password</dd></div>
+                    }
+                </dl>
+                <h2>Readiness</h2>
+                <dl class="verification-list compact-verification">
+                    <div><dt>Microsoft 365</dt><dd>@ReadinessText(Readiness.MicrosoftReady)</dd></div>
+                    <div><dt>Printer connectivity</dt><dd>@ReadinessText(_endpointAdvice.IsLanReachable)</dd></div>
+                    <div><dt>SMTP authentication</dt><dd>@ReadinessText(_endpointAdvice.IsAuthenticatedSmtpAvailable)</dd></div>
+                </dl>
+                @if (_sender is null)
+                {
+                    <div class="notice error" role="alert">Connect Microsoft 365 and authorize a sender before creating a device. <a href="/setup/microsoft">Open Microsoft 365 setup</a>.</div>
+                }
+                else if (!Readiness.MicrosoftReady)
+                {
+                    <div class="notice error" role="alert">Microsoft 365 must be verified during this service start before creating a device. <a href="/setup/microsoft">Verify Microsoft 365</a>.</div>
+                }
+                @if (!_endpointAdvice.IsLanReachable || (_authentication == AuthenticationChoice.Yes && !_endpointAdvice.IsAuthenticatedSmtpAvailable))
+                {
+                    <div class="notice error" role="alert">The current SMTP listener cannot support this device. <a href="/settings#printer-connectivity">Prepare printer connectivity</a>, restart RelayBridge, then return to this review.</div>
+                }
+                <div class="actions"><button class="button primary" disabled="@(!CanCreate || _busy)" @onclick="CreateDevice">Create device</button><button class="button secondary" disabled="@_busy" @onclick="() => _step--">Back</button></div>
+                break;
+
+            case 5:
+                <div class="complete-mark" aria-hidden="true">✓</div>
+                <p class="eyebrow">Printer settings</p>
+                <h1>@($"{_created!.Name} is ready")</h1>
+                <p class="lead">Enter these settings in the device's Email or SMTP configuration.</p>
+                <div class="setup-values">
+                    <PrinterServerAddresses Advice="@_endpointAdvice" OnCopy="CopyAsync" />
+                    <SetupValue Label="Port" Value="@_endpointAdvice.Port.ToString()" Copy="@(() => CopyAsync(_endpointAdvice.Port.ToString()))" />
+                    <SetupValue Label="Connection security" Value="None" />
+                    <SetupValue Label="Authentication" Value="@(_created.AuthenticationMode == DeviceAuthenticationMode.Authenticated ? "Enabled" : "Off — Legacy")" />
+                    @if (_created.SmtpUsername is not null)
+                    {
+                        <SetupValue Label="SMTP username" Value="@_created.SmtpUsername" Copy="@(() => CopyAsync(_created.SmtpUsername))" />
+                    }
+                    @if (_oneTimePassword is not null)
+                    {
+                        <div class="secret-value">
+                            <span>Password</span>
+                            <div><input aria-label="One-time SMTP password" readonly type="@(_showPassword ? "text" : "password")" value="@_oneTimePassword" /><button class="button secondary" @onclick="() => _showPassword = !_showPassword">@(_showPassword ? "Hide" : "Show")</button><button class="button secondary" @onclick="() => CopyAsync(_oneTimePassword)">Copy</button></div>
+                            <strong>Save this password now. RelayBridge will not display it again after you leave or refresh this page.</strong>
+                        </div>
+                        <label class="acknowledgement"><input type="checkbox" @bind="_passwordSavedAcknowledged" /> <span>I saved the SMTP password</span></label>
+                        <p class="guidance">If this password is lost, reset the device password to generate a new one. Printed instructions do not include the password; record it separately.</p>
+                    }
+                    <SetupValue Label="From address" Value="@_created.AllowedSenders[0]" Copy="@(() => CopyAsync(_created.AllowedSenders[0]))" />
+                </div>
+                <div class="connection-security-note"><strong>On the printer</strong><p>Disable SSL/TLS and STARTTLS for this Printer → RelayBridge connection. Use these settings only on the trusted private LAN configured above. RelayBridge still uses validated TLS and OAuth when sending to Microsoft 365.</p></div>
+                <div class="actions no-print"><button class="button primary" disabled="@HasUnacknowledgedPassword" @onclick="GoToTest">Test device</button><button class="button secondary" @onclick="PrintAsync">Print instructions</button><button class="button secondary" disabled="@HasUnacknowledgedPassword" @onclick="Finish">Finish</button></div>
+                break;
+        }
+    </section>
+</div>
+
+@code {
+    private static readonly (int Number, string Label)[] Steps = [(1, "Name"), (2, "Security"), (3, "Network"), (4, "Review"), (5, "Ready")];
+    private int _step = 1;
+    private string _name = string.Empty;
+    private string _description = string.Empty;
+    private string _network = string.Empty;
+    private AuthenticationChoice _authentication = AuthenticationChoice.Yes;
+    private string? _sender;
+    private string? _notice;
+    private bool _error;
+    private bool _busy;
+    private DeviceDefinition? _created;
+    private string? _oneTimePassword;
+    private bool _showPassword;
+    private DeviceEndpointAdvice _endpointAdvice = null!;
+    private DeviceProvisioningReview? _review;
+    private Guid? _pendingDeviceId;
+    private bool _passwordSavedAcknowledged;
+
+    protected override void OnInitialized()
+    {
+        RefreshReview();
+    }
+
+    private string SecuritySummary => _authentication == AuthenticationChoice.Yes
+        ? "Compatible — SMTP authentication, IP restriction, sender restriction"
+        : "Legacy — no authentication, strict private-network restriction, sender restriction";
+    private string NormalizedNetwork => IpNetwork.TryParse(_network, out var parsed) ? parsed.ToString() : _network.Trim();
+    private DeviceAuthenticationMode? SelectedAuthenticationMode => _authentication switch
+    {
+        AuthenticationChoice.Yes => DeviceAuthenticationMode.Authenticated,
+        AuthenticationChoice.No => DeviceAuthenticationMode.Legacy,
+        _ => null,
+    };
+    private DeviceSetupReadiness Readiness => new(
+        MicrosoftConfigured: _sender is not null,
+        MicrosoftReady: _review?.MicrosoftReadiness == MicrosoftRuntimeReadiness.Ready,
+        PrinterConnectivityReady: _endpointAdvice.IsLanReachable,
+        SmtpAuthenticationReady: _endpointAdvice.IsAuthenticatedSmtpAvailable,
+        InboundTlsAvailable: false);
+    private bool CanCreate => Readiness.CanCreate(SelectedAuthenticationMode);
+    private bool HasUnacknowledgedPassword => !OneTimeSecretExitPolicy.CanLeave(_oneTimePassword, _passwordSavedAcknowledged);
+
+    private void ContinueFromName()
+    {
+        ClearNotice();
+        if (string.IsNullOrWhiteSpace(_name)) { Fail("Enter a name for this device."); return; }
+        if (_name.Trim().Length > 100 || _description.Trim().Length > 500) { Fail("Keep the name under 100 characters and the description under 500 characters."); return; }
+        _step = 2;
+    }
+
+    private void ContinueFromSecurity()
+    {
+        ClearNotice();
+        if (_authentication == AuthenticationChoice.NotSure)
+        {
+            Fail("Choose whether the printer supports SMTP authentication before continuing.");
+            return;
+        }
+
+        _step = 3;
+    }
+
+    private void ChooseAuthentication(AuthenticationChoice choice)
+    {
+        _authentication = choice;
+        ClearNotice();
+    }
+
+    private void ContinueFromNetwork()
+    {
+        ClearNotice();
+        if (!IpNetwork.TryParse(_network, out var parsed)) { Fail("Enter a valid IP address or CIDR network."); return; }
+        if (parsed.PrefixLength == 0) { Fail("This would allow every address. Enter the device's IP or a restricted subnet."); return; }
+        if (_authentication != AuthenticationChoice.Yes && !parsed.IsPrivateOrLocal) { Fail("Legacy devices must use a private or local network address."); return; }
+        _network = parsed.ToString();
+        RefreshReview();
+        _pendingDeviceId ??= Guid.CreateVersion7();
+        _step = 4;
+    }
+
+    private void CreateDevice()
+    {
+        if (_busy || _created is not null || _step != 4)
+        {
+            return;
+        }
+
+        var reviewed = _review;
+        var current = GetCurrentReview(out var currentAdvice);
+        if (reviewed is null || !reviewed.MateriallyMatches(current))
+        {
+            ApplyReview(current, currentAdvice);
+            Fail("RelayBridge configuration changed while you were reviewing this device. Review the latest Microsoft sender and printer connectivity, then try again.");
+            return;
+        }
+
+        if (_sender is null || reviewed?.ConfigurationFingerprint is null || _pendingDeviceId is null || !CanCreate)
+        {
+            Fail("Complete Microsoft 365 and printer-connectivity readiness before creating this device.");
+            return;
+        }
+
+        _busy = true;
+        ClearNotice();
+        try
+        {
+            if (_authentication == AuthenticationChoice.Yes)
+            {
+                var provisioned = Devices.ProvisionAuthenticatedDeviceForActiveMicrosoftConfiguration(
+                    _pendingDeviceId.Value,
+                    _name,
+                    _description,
+                    [_network],
+                    [_sender],
+                    reviewed.ConfigurationFingerprint,
+                    _sender);
+                _created = provisioned.Device;
+                _oneTimePassword = provisioned.PlaintextPassword;
+            }
+            else
+            {
+                _created = Devices.AddLegacyDeviceForActiveMicrosoftConfiguration(
+                    _pendingDeviceId.Value,
+                    _name,
+                    _description,
+                    [_network],
+                    [_sender],
+                    reviewed.ConfigurationFingerprint,
+                    _sender);
+            }
+
+            _step = 5;
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or FormatException)
+        {
+            Fail(exception.Message);
+        }
+        catch (SqliteException)
+        {
+            Fail("RelayBridge could not save this device. No device was created; try again.");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CopyAsync(string text)
+    {
+        await JavaScript.InvokeVoidAsync("relayBridge.copyText", text);
+        _notice = "Copied to the clipboard.";
+        _error = false;
+    }
+
+    private async Task PrintAsync() => await JavaScript.InvokeVoidAsync("relayBridge.printPage");
+
+    private void GoToTest()
+    {
+        if (_created is null || HasUnacknowledgedPassword) return;
+        _oneTimePassword = null;
+        Navigation.NavigateTo($"/devices/{_created.Id:D}");
+    }
+
+    private void Finish()
+    {
+        if (HasUnacknowledgedPassword) return;
+        _oneTimePassword = null;
+        Navigation.NavigateTo("/devices");
+    }
+
+    private Task ProtectOneTimePassword(LocationChangingContext context)
+    {
+        if (HasUnacknowledgedPassword)
+        {
+            context.PreventNavigation();
+            Fail("Confirm that you saved the SMTP password before leaving. If it is lost, reset the device password to generate a new one.");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static string ReadinessText(bool ready) => ready ? "✓ Ready" : "✕ Needs attention";
+
+    private DeviceProvisioningReview GetCurrentReview(out DeviceEndpointAdvice advice)
+    {
+        var activeConfiguration = Database.GetActiveMicrosoftConfiguration();
+        advice = Endpoints.GetAdvice();
+        var microsoftReadiness = MicrosoftRuntimeReadinessPolicy.Evaluate(
+            activeConfiguration?.AuthorizedSender is not null,
+            activeConfiguration?.Fingerprint,
+            MicrosoftIdentity,
+            ExchangeDelivery);
+        return DeviceProvisioningReview.Capture(activeConfiguration, advice, microsoftReadiness);
+    }
+
+    private void RefreshReview()
+    {
+        var review = GetCurrentReview(out var advice);
+        ApplyReview(review, advice);
+    }
+
+    private void ApplyReview(DeviceProvisioningReview review, DeviceEndpointAdvice advice)
+    {
+        _review = review;
+        _sender = review.Sender;
+        _endpointAdvice = advice;
+    }
+
+    private void ClearNotice() { _notice = null; _error = false; }
+    private void Fail(string message) { _notice = message; _error = true; }
+
+    private enum AuthenticationChoice { Yes, No, NotSure }
+}

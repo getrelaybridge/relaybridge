@@ -1,0 +1,7 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>RelayBridge.StartupHookProbe</AssemblyName>
+  </PropertyGroup>
+</Project>

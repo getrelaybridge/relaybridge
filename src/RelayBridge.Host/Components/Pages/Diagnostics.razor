@@ -1,0 +1,288 @@
+@* SPDX-License-Identifier: MPL-2.0 *@
+
+@page "/diagnostics"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@using RelayBridge.Core.Diagnostics
+@using RelayBridge.Host.Diagnostics
+@inject RelayDiagnosticsService DiagnosticsService
+@inject DiagnosticsActionState Actions
+
+<PageTitle>Diagnostics · RelayBridge</PageTitle>
+
+<div class="page-heading">
+    <div>
+        <p class="eyebrow">Local supportability</p>
+        <h1>Diagnostics</h1>
+        <p class="lead">Current local health, evidence provenance, and safe administrator-triggered checks.</p>
+    </div>
+    <button class="button secondary" disabled="@_busy" @onclick="Refresh">Refresh</button>
+</div>
+
+<section class="health-banner diagnostic-banner @StatusClass(Snapshot.Overall.Status)" aria-labelledby="overall-status">
+    <span class="status-dot @StatusClass(Snapshot.Overall.Status)" aria-hidden="true">@StatusSymbol(Snapshot.Overall.Status)</span>
+    <div>
+        <strong id="overall-status">Overall: @StatusText(Snapshot.Overall.Status)</strong>
+        <span>@Snapshot.Overall.Summary</span>
+        <small>@Provenance(Snapshot.Overall)</small>
+    </div>
+</section>
+
+@if (!string.IsNullOrWhiteSpace(_actionMessage))
+{
+    <p class="notice" role="status">@_actionMessage</p>
+}
+
+<div class="diagnostics-grid">
+    <section class="detail-card" aria-labelledby="runtime-heading">
+        <CardHeading Id="runtime-heading" Title="RelayBridge service" Evidence="Snapshot.Runtime.Evidence" />
+        <dl class="stacked-details">
+            <div><dt>Version</dt><dd>@Snapshot.Runtime.Version</dd></div>
+            <div><dt>Build</dt><dd>@Snapshot.Runtime.InformationalVersion</dd></div>
+            <div><dt>Uptime</dt><dd>@FormatDuration(Snapshot.Runtime.Uptime)</dd></div>
+            <div><dt>Operating system</dt><dd>@Snapshot.Runtime.OperatingSystem</dd></div>
+            <div><dt>.NET runtime</dt><dd>@Snapshot.Runtime.DotNetRuntime</dd></div>
+            <div><dt>Hosting mode</dt><dd>@Snapshot.Runtime.HostingMode</dd></div>
+            <div><dt>Management</dt><dd><strong>Loopback only</strong></dd></div>
+        </dl>
+    </section>
+
+    <section class="detail-card" aria-labelledby="smtp-heading">
+        <CardHeading Id="smtp-heading" Title="SMTP intake" Evidence="Snapshot.Smtp.Evidence" />
+        <dl class="stacked-details">
+            <div><dt>Listener</dt><dd>@(Snapshot.Smtp.Listening ? "Listening" : Snapshot.Smtp.Enabled ? "Not listening" : "Disabled")</dd></div>
+            <div><dt>Actual binding</dt><dd>@BindingText</dd></div>
+            <div><dt>Intake mode</dt><dd>@Snapshot.Smtp.IntakeMode</dd></div>
+            <div><dt>Enabled devices</dt><dd>@Snapshot.Smtp.EnabledDeviceCount</dd></div>
+            <div><dt>Last accepted locally</dt><dd>@FormatTimestamp(Snapshot.Smtp.LastAcceptedMessageUtc)</dd></div>
+            <div><dt>Inbound STARTTLS</dt><dd>@Snapshot.Smtp.InboundStartTls</dd></div>
+            <div><dt>Cleartext AUTH boundary</dt><dd>@Snapshot.Smtp.CleartextAuthenticationBoundary</dd></div>
+        </dl>
+    </section>
+
+    <section class="detail-card" aria-labelledby="queue-heading">
+        <CardHeading Id="queue-heading" Title="Queue" Evidence="Snapshot.Queue.Evidence" />
+        <p class="metric">@Snapshot.Queue.ActiveCount <span>active</span></p>
+        <dl class="stacked-details">
+            <div><dt>Ready / pending</dt><dd>@Snapshot.Queue.ReadyCount</dd></div>
+            <div><dt>Retrying</dt><dd>@Snapshot.Queue.RetryingCount</dd></div>
+            <div><dt>Delivering</dt><dd>@Snapshot.Queue.DeliveringCount</dd></div>
+            <div><dt>Permanent failure</dt><dd>@Snapshot.Queue.PermanentFailureCount</dd></div>
+            <div><dt>Oldest queued</dt><dd>@FormatAge(Snapshot.Queue.OldestQueuedUtc)</dd></div>
+            <div><dt>Next retry</dt><dd>@FormatTimestamp(Snapshot.Queue.NextRetryUtc)</dd></div>
+            <div><dt>Worker</dt><dd>@WorkerText</dd></div>
+        </dl>
+    </section>
+
+    <section class="detail-card" aria-labelledby="microsoft-heading">
+        <CardHeading Id="microsoft-heading" Title="Microsoft configuration" Evidence="Snapshot.Microsoft.Evidence" />
+        <dl class="stacked-details">
+            <div><dt>Configured</dt><dd>@YesNo(Snapshot.Microsoft.Configured)</dd></div>
+            <div><dt>Active configuration</dt><dd>@YesNo(Snapshot.Microsoft.ActiveConfigurationExists)</dd></div>
+            <div><dt>Runtime readiness</dt><dd><strong>@Snapshot.Microsoft.Readiness</strong></dd></div>
+            <div><dt>Last successful verification</dt><dd>@FormatTimestamp(Snapshot.Microsoft.LastSuccessfulVerificationUtc)</dd></div>
+            <div><dt>Last completed evidence</dt><dd>@FormatTimestamp(Snapshot.Microsoft.LastCompletedVerificationUtc)</dd></div>
+            <div><dt>Last activation</dt><dd>@FormatTimestamp(Snapshot.Microsoft.LastActivationUtc)</dd></div>
+            <div><dt>Activation epoch</dt><dd>@(Snapshot.Microsoft.ActivationIdPresent ? "Present" : "Not present")</dd></div>
+        </dl>
+        <p class="card-note">Configuration, current-process verification, and live connectivity are separate evidence.</p>
+    </section>
+
+    <section class="detail-card" aria-labelledby="certificate-heading">
+        <CardHeading Id="certificate-heading" Title="Certificate" Evidence="Snapshot.Certificate.Evidence" />
+        <dl class="stacked-details">
+            <div><dt>Certificate present</dt><dd>@YesNo(Snapshot.Certificate.Present)</dd></div>
+            <div><dt>Private key accessible</dt><dd>@YesNo(Snapshot.Certificate.PrivateKeyAccessible)</dd></div>
+            <div><dt>Valid from</dt><dd>@FormatTimestamp(Snapshot.Certificate.ValidFromUtc)</dd></div>
+            <div><dt>Expires</dt><dd>@FormatTimestamp(Snapshot.Certificate.ExpiresUtc)</dd></div>
+            <div><dt>Remaining lifetime</dt><dd>@RemainingLifetime</dd></div>
+            <div><dt>Expired</dt><dd>@YesNo(Snapshot.Certificate.Expired)</dd></div>
+            <div><dt>Reference</dt><dd>@(Snapshot.Certificate.AbbreviatedThumbprint ?? "Not available")</dd></div>
+        </dl>
+    </section>
+
+    <section class="detail-card" aria-labelledby="setup-heading">
+        <CardHeading Id="setup-heading" Title="Last Microsoft setup result" Evidence="Snapshot.Setup.Evidence" />
+        <dl class="stacked-details">
+            <div><dt>Stage</dt><dd>@Snapshot.Setup.Stage</dd></div>
+            <div><dt>Category</dt><dd>@Snapshot.Setup.Category</dd></div>
+            <div><dt>Safe code</dt><dd>@(Snapshot.Setup.SafeCode ?? "None")</dd></div>
+            @if (Snapshot.Setup.PowerShellExceptionType is not null)
+            {
+                <div><dt>Microsoft error type</dt><dd>@Snapshot.Setup.PowerShellExceptionType</dd></div>
+            }
+            @if (Snapshot.Setup.FullyQualifiedErrorId is not null)
+            {
+                <div><dt>PowerShell error ID</dt><dd>@Snapshot.Setup.FullyQualifiedErrorId</dd></div>
+            }
+            @if (Snapshot.Setup.HttpStatusCode is not null)
+            {
+                <div><dt>HTTP status</dt><dd>@Snapshot.Setup.HttpStatusCode</dd></div>
+            }
+        </dl>
+    </section>
+
+    <section class="detail-card diagnostic-action" aria-labelledby="connectivity-heading">
+        <CardHeading Id="connectivity-heading" Title="Exchange connectivity" Evidence="Snapshot.Connectivity.Evidence" />
+        <dl class="stacked-details">
+            <div><dt>Result</dt><dd>@StatusText(Snapshot.Connectivity.Evidence.Status)</dd></div>
+            <div><dt>Stage</dt><dd>@Snapshot.Connectivity.Stage</dd></div>
+            <div><dt>Elapsed</dt><dd>@(Snapshot.Connectivity.Elapsed is null ? "Not run" : $"{Snapshot.Connectivity.Elapsed.Value.TotalMilliseconds:N0} ms")</dd></div>
+        </dl>
+        <p class="card-note">DNS → TCP 587 → greeting → EHLO → STARTTLS → normal certificate-validated TLS. No authentication or mail submission.</p>
+        <button class="button primary" disabled="@_busy" @onclick="RunConnectivityAsync">Run connectivity checks</button>
+    </section>
+
+    <section class="detail-card diagnostic-action" aria-labelledby="storage-heading">
+        <CardHeading Id="storage-heading" Title="Storage and database" Evidence="Snapshot.Storage.Evidence" />
+        <dl class="stacked-details">
+            <div><dt>SQLite accessible</dt><dd>@YesNo(Snapshot.Storage.DatabaseAccessible)</dd></div>
+            <div><dt>Storage accessible</dt><dd>@YesNo(Snapshot.Storage.StorageDirectoryAccessible)</dd></div>
+            <div><dt>Schema version</dt><dd>@(Snapshot.Storage.SchemaVersion?.ToString() ?? "Unavailable")</dd></div>
+            <div><dt>Free disk space</dt><dd>@FormatBytes(Snapshot.Storage.FreeDiskBytes)</dd></div>
+            <div><dt>Quick check</dt><dd>@StatusText(Snapshot.Storage.QuickCheck.Status) · @Snapshot.Storage.QuickCheck.Summary</dd></div>
+        </dl>
+        <button class="button secondary" disabled="@_busy" @onclick="RunDatabaseCheckAsync">Database quick check</button>
+    </section>
+
+    <section class="detail-card" aria-labelledby="security-heading">
+        <CardHeading Id="security-heading" Title="Security boundaries" Evidence="Snapshot.Security.Evidence" />
+        <dl class="stacked-details">
+            <div><dt>Management loopback-only</dt><dd>@PassFail(Snapshot.Security.ManagementLoopbackOnly)</dd></div>
+            <div><dt>Authenticated cleartext SMTP</dt><dd>@Snapshot.Security.AuthenticatedCleartextSmtp</dd></div>
+            <div><dt>Inbound STARTTLS</dt><dd>@Snapshot.Security.InboundStartTls</dd></div>
+            <div><dt>Private Microsoft tooling</dt><dd>@Snapshot.Security.PrivateMicrosoftTooling</dd></div>
+            <div><dt>Certificate private key</dt><dd>@Snapshot.Security.CertificatePrivateKey</dd></div>
+            <div><dt>Provisioning scratch</dt><dd>@Snapshot.Security.ProvisioningScratch</dd></div>
+        </dl>
+    </section>
+
+    <section class="detail-card support-card" aria-labelledby="support-heading">
+        <div class="card-heading"><h2 id="support-heading">Support bundle</h2></div>
+        <p>Create a small local ZIP containing only allowlisted diagnostic snapshots. RelayBridge does not upload it.</p>
+        <ul>
+            <li>No messages, addresses, credentials, tokens, private keys, raw configuration, database, or logs.</li>
+            <li>Software, runtime, listener, storage-capacity, and network metadata remain; review before sharing.</li>
+        </ul>
+        <a class="button primary" href="/diagnostics/support-bundle">Generate support bundle</a>
+    </section>
+</div>
+
+@code {
+    private RelayDiagnosticsSnapshot Snapshot { get; set; } = null!;
+    private bool _busy;
+    private string? _actionMessage;
+
+    protected override void OnInitialized() => Refresh();
+
+    private void Refresh()
+    {
+        Snapshot = DiagnosticsService.GetSnapshot();
+        _actionMessage = null;
+    }
+
+    private async Task RunConnectivityAsync()
+    {
+        _busy = true;
+        _actionMessage = "Running the non-authenticated Exchange Online connectivity check…";
+        try
+        {
+            var result = await Actions.RunConnectivityAsync();
+            Snapshot = DiagnosticsService.GetSnapshot();
+            _actionMessage = result.Evidence.Summary;
+        }
+        catch (OperationCanceledException)
+        {
+            _actionMessage = "The connectivity check was cancelled.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RunDatabaseCheckAsync()
+    {
+        _busy = true;
+        _actionMessage = "Running SQLite quick check…";
+        try
+        {
+            var result = await Actions.RunDatabaseQuickCheckAsync();
+            Snapshot = DiagnosticsService.GetSnapshot();
+            _actionMessage = result.Summary;
+        }
+        catch (OperationCanceledException)
+        {
+            _actionMessage = "The database quick check was cancelled.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private string BindingText => Snapshot.Smtp.BoundAddress is null || Snapshot.Smtp.BoundPort is null
+        ? "Not bound"
+        : $"{Snapshot.Smtp.BoundAddress}:{Snapshot.Smtp.BoundPort}";
+
+    private string WorkerText => !Snapshot.Queue.WorkerExpected
+        ? "Disabled by configuration"
+        : Snapshot.Queue.WorkerRunning ? "Running" : "Not running";
+
+    private string RemainingLifetime => Snapshot.Certificate.RemainingDays is null
+        ? "Unavailable"
+        : $"{Snapshot.Certificate.RemainingDays.Value:N0} days";
+
+    private static string Provenance(DiagnosticEvidence evidence) =>
+        $"Observed {evidence.ObservedUtc.ToLocalTime():g} · Evidence: {evidence.Source}";
+
+    private static string StatusText(DiagnosticStatus status) => status switch
+    {
+        DiagnosticStatus.Healthy => "Healthy",
+        DiagnosticStatus.Attention => "Needs attention",
+        DiagnosticStatus.Unavailable => "Unavailable",
+        DiagnosticStatus.NotConfigured => "Not configured",
+        _ => "Unknown",
+    };
+
+    private static string StatusClass(DiagnosticStatus status) => status switch
+    {
+        DiagnosticStatus.Healthy => "ready",
+        DiagnosticStatus.Attention or DiagnosticStatus.Unavailable => "attention",
+        _ => "neutral",
+    };
+
+    private static string StatusSymbol(DiagnosticStatus status) => status switch
+    {
+        DiagnosticStatus.Healthy => "✓",
+        DiagnosticStatus.Attention or DiagnosticStatus.Unavailable => "!",
+        _ => "·",
+    };
+
+    private static string YesNo(bool value) => value ? "Yes" : "No";
+    private static string PassFail(bool value) => value ? "PASS" : "FAIL";
+
+    private static string FormatTimestamp(DateTimeOffset? value) => value is null
+        ? "Not available"
+        : value.Value.ToLocalTime().ToString("g");
+
+    private static string FormatAge(DateTimeOffset? value) => value is null
+        ? "No active message"
+        : FormatDuration(DateTimeOffset.UtcNow - value.Value);
+
+    private static string FormatDuration(TimeSpan value)
+    {
+        if (value < TimeSpan.Zero) value = TimeSpan.Zero;
+        return value.TotalDays >= 1
+            ? $"{(int)value.TotalDays}d {value.Hours}h"
+            : value.TotalHours >= 1
+                ? $"{(int)value.TotalHours}h {value.Minutes}m"
+                : value.TotalMinutes >= 1 ? $"{(int)value.TotalMinutes}m {value.Seconds}s" : $"{value.Seconds}s";
+    }
+
+    private static string FormatBytes(long? value)
+    {
+        if (value is null) return "Unavailable";
+        var gib = value.Value / (1024d * 1024d * 1024d);
+        return $"{gib:N1} GiB";
+    }
+}

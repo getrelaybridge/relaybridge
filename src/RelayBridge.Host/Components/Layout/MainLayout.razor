@@ -1,0 +1,22 @@
+@* SPDX-License-Identifier: MPL-2.0 *@
+
+@inherits LayoutComponentBase
+
+<header class="app-header">
+    <a class="brand" href="/">RelayBridge</a>
+    <nav aria-label="Primary navigation">
+        <NavLink href="/" Match="NavLinkMatch.All">Dashboard</NavLink>
+        <NavLink href="/devices">Devices</NavLink>
+        <NavLink href="/setup/microsoft">Microsoft 365</NavLink>
+        <NavLink href="/diagnostics">Diagnostics</NavLink>
+        <NavLink href="/settings">Settings</NavLink>
+    </nav>
+</header>
+
+<main>
+    @Body
+</main>
+
+<footer>
+    Local SMTP-to-Microsoft-365 relay
+</footer>

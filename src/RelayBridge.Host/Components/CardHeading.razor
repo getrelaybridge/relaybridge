@@ -1,0 +1,45 @@
+@* SPDX-License-Identifier: MPL-2.0 *@
+
+@using RelayBridge.Core.Diagnostics
+
+<div class="card-heading diagnostic-card-heading">
+    <div>
+        <h2 id="@Id">@Title</h2>
+        <p class="status-line @StatusClass"><span aria-hidden="true">@StatusSymbol</span> @StatusText</p>
+    </div>
+    <small>@Evidence.Source<br />@Evidence.ObservedUtc.ToLocalTime().ToString("g")</small>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public required string Id { get; set; }
+
+    [Parameter, EditorRequired]
+    public required string Title { get; set; }
+
+    [Parameter, EditorRequired]
+    public required DiagnosticEvidence Evidence { get; set; }
+
+    private string StatusText => Evidence.Status switch
+    {
+        DiagnosticStatus.Healthy => "Healthy",
+        DiagnosticStatus.Attention => "Needs attention",
+        DiagnosticStatus.Unavailable => "Unavailable",
+        DiagnosticStatus.NotConfigured => "Not configured",
+        _ => "Unknown",
+    };
+
+    private string StatusClass => Evidence.Status switch
+    {
+        DiagnosticStatus.Healthy => "ready",
+        DiagnosticStatus.Attention or DiagnosticStatus.Unavailable => "attention",
+        _ => "neutral",
+    };
+
+    private string StatusSymbol => Evidence.Status switch
+    {
+        DiagnosticStatus.Healthy => "✓",
+        DiagnosticStatus.Attention or DiagnosticStatus.Unavailable => "!",
+        _ => "·",
+    };
+}

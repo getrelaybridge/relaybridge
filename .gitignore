@@ -1,0 +1,41 @@
+# .NET build output
+**/bin/
+**/obj/
+artifacts/
+
+# IDE and user settings
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Test output
+TestResults/
+*.trx
+coverage/
+
+# Local configuration and secrets
+.local/
+appsettings.Local.json
+*.pfx
+*.p12
+*.key
+*.pem
+.env
+
+# Package and installer intermediates
+*.nupkg
+*.snupkg
+*.wixpdb
+
+# Runtime data must never be committed
+Data/
+spool/
+*.db
+*.db-shm
+*.db-wal
+
+# OS files
+.DS_Store
+Thumbs.db

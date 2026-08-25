@@ -1,0 +1,13 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>RelayBridge.ConsoleHostProbe</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\RelayBridge.Setup\RelayBridge.Setup.csproj" />
+  </ItemGroup>
+</Project>

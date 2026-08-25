@@ -1,0 +1,30 @@
+@* SPDX-License-Identifier: MPL-2.0 *@
+
+@using RelayBridge.Infrastructure.Smtp
+
+@if (Advice.Candidates.Count == 1)
+{
+    var candidate = Advice.Candidates[0];
+    <SetupValue Label="SMTP server" Value="@candidate.Address.ToString()" Copy="@(() => CopyAsync(candidate.Address.ToString()))" />
+}
+else if (Advice.Candidates.Count > 1)
+{
+    <div class="address-choice">
+        <strong>SMTP server</strong>
+        <p>Use the address reachable from this printer. RelayBridge has not saved one interface as the device's permanent choice.</p>
+    </div>
+    @foreach (var candidate in Advice.Candidates)
+    {
+        <SetupValue Label="@candidate.InterfaceName" Value="@candidate.Address.ToString()" Copy="@(() => CopyAsync(candidate.Address.ToString()))" />
+    }
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public DeviceEndpointAdvice Advice { get; set; } = null!;
+
+    [Parameter]
+    public EventCallback<string> OnCopy { get; set; }
+
+    private Task CopyAsync(string value) => OnCopy.InvokeAsync(value);
+}

@@ -1,0 +1,280 @@
+@* SPDX-License-Identifier: MPL-2.0 *@
+
+@page "/devices/{DeviceId:guid}"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@using Microsoft.Data.Sqlite
+@using Microsoft.AspNetCore.Components.Routing
+@using RelayBridge.Core.Devices
+@using RelayBridge.Core.Queue
+@using RelayBridge.Host.Services
+@using RelayBridge.Infrastructure.Smtp
+@using RelayBridge.Infrastructure.Storage
+@inject DeviceOverviewService Overview
+@inject DeviceService Devices
+@inject DeviceEndpointAdvisor Endpoints
+@inject IJSRuntime JavaScript
+
+<PageTitle>@(_item?.Device.Name ?? "Device") · RelayBridge</PageTitle>
+
+<NavigationLock ConfirmExternalNavigation="@HasUnacknowledgedPassword" OnBeforeInternalNavigation="ProtectOneTimePassword" />
+
+@if (_item is null)
+{
+    <section class="empty-state"><h1>Device not found</h1><p>The device may have been removed.</p><a class="button secondary" href="/devices">Back to devices</a></section>
+}
+else
+{
+    <div class="page-heading">
+        <div><p class="eyebrow">Device</p><h1>@_item.Device.Name</h1>@if (!string.IsNullOrWhiteSpace(_item.Device.Description)) { <p class="lead">@_item.Device.Description</p> }</div>
+        <p class="status-pill @StatusClass"><span aria-hidden="true">@StatusSymbol</span> @StatusText</p>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_notice))
+    {
+        <div class="notice @(_error ? "error" : "success")" role="@(_error ? "alert" : "status")">@_notice</div>
+    }
+
+    <section class="detail-grid" aria-label="Device configuration">
+        <article class="detail-card">
+            <h2>Connection</h2>
+            <dl class="stacked-details">
+                <div><dt>Allowed network</dt><dd>@string.Join(", ", _item.Device.AllowedNetworks)</dd></div>
+                <div><dt>Security</dt><dd>@SecurityText</dd></div>
+                @if (_item.Device.SmtpUsername is not null) { <div><dt>SMTP username</dt><dd><code>@_item.Device.SmtpUsername</code></dd></div> }
+                <div><dt>Sender</dt><dd>@string.Join(", ", _item.Device.AllowedSenders)</dd></div>
+            </dl>
+        </article>
+        <article class="detail-card">
+            <h2>Activity</h2>
+            <dl class="stacked-details">
+                <div><dt>Last message accepted locally</dt><dd>@FormatDate(_item.Activity.LastAcceptedUtc)</dd></div>
+                <div><dt>Last accepted by Microsoft 365</dt><dd>@FormatDate(_item.Activity.LastDeliveredUtc)</dd></div>
+                <div><dt>Messages today</dt><dd>@_item.Activity.MessagesSince</dd></div>
+            </dl>
+        </article>
+    </section>
+
+    <section class="device-actions" aria-label="Device actions">
+        <button class="button primary" @onclick="StartTest">Test device</button>
+        <button class="button secondary" disabled="@_mutationBusy" @ref="_editTrigger" @onclick="BeginEdit">Edit</button>
+        @if (_item.Device.AuthenticationMode == DeviceAuthenticationMode.Authenticated)
+        {
+            <button class="button secondary" disabled="@(HasUnacknowledgedPassword || _mutationBusy)" @ref="_resetTrigger" @onclick="ShowResetConfirmation">Reset password</button>
+        }
+        <button class="button secondary" disabled="@_mutationBusy" @ref="_enabledTrigger" @onclick="ShowEnabledConfirmation">@(_item.Device.Enabled ? "Disable" : "Enable")</button>
+    </section>
+
+    @if (_testing)
+    {
+        <section class="action-panel" aria-labelledby="test-heading">
+            <p class="eyebrow">Connection test</p><h2 id="test-heading">Waiting for @(_item.Device.Name)</h2>
+            <p>Send a scan or test email from the device now. RelayBridge is listening for its configured username/network and sender.</p>
+            <div class="test-checks">
+                <p><span aria-hidden="true">@(_testResult.LocalAccepted ? "✓" : "○")</span> Message accepted locally</p>
+                <p><span aria-hidden="true">@(_testResult.MicrosoftAccepted ? "✓" : "○")</span> Message accepted by Microsoft 365</p>
+            </div>
+            <p class="card-note @(_testResult.IsFailure ? "attention" : null)">@_testResult.Message</p>
+            <div class="actions"><button class="button primary" @onclick="CheckTest">Check now</button><button class="button secondary" @onclick="() => _testing = false">Stop waiting</button></div>
+        </section>
+    }
+
+    @if (_editing)
+    {
+        <section class="action-panel" tabindex="-1" @ref="_editPanel" aria-labelledby="edit-heading">
+            <h2 id="edit-heading">Edit device</h2>
+            <label for="edit-name">Device name</label><input id="edit-name" maxlength="100" @bind="_editName" />
+            <label for="edit-description">Description <span class="optional">Optional</span></label><input id="edit-description" maxlength="500" @bind="_editDescription" />
+            @for (var index = 0; index < _editNetworks.Count; index++)
+            {
+                var networkIndex = index;
+                <label for="@($"edit-network-{networkIndex}")">Allowed IP or subnet @(_editNetworks.Count > 1 ? networkIndex + 1 : null)</label>
+                <input id="@($"edit-network-{networkIndex}")" @bind="_editNetworks[networkIndex]" />
+            }
+            <div class="warning-panel"><strong>Address changes apply immediately</strong><p>Changing this address takes effect immediately. The old printer address will no longer be allowed to submit.</p></div>
+            <p class="guidance">Every existing network rule is shown and preserved. The SMTP username and security mode stay fixed so this edit does not silently break printer authentication. Existing queued mail is not changed.</p>
+            <div class="actions"><button class="button primary" disabled="@_mutationBusy" @onclick="SaveEdit">Save changes</button><button class="button secondary" disabled="@_mutationBusy" @onclick="CancelEdit">Cancel</button></div>
+        </section>
+    }
+
+    @if (_confirmReset)
+    {
+        <section class="action-panel danger-panel" tabindex="-1" @ref="_resetPanel" aria-labelledby="reset-heading">
+            <h2 id="reset-heading">Reset SMTP password?</h2><p>The current device password will stop working immediately. You will need to update the device with the new password.</p>
+            <div class="actions"><button class="button danger" disabled="@_mutationBusy" @onclick="ResetPassword">Reset password</button><button class="button secondary" disabled="@_mutationBusy" @onclick="CancelResetConfirmation">Cancel</button></div>
+        </section>
+    }
+
+    @if (_newPassword is not null)
+    {
+        <section class="action-panel secret-panel" tabindex="-1" @ref="_newPasswordPanel" aria-labelledby="new-password-heading">
+            <h2 id="new-password-heading">New password</h2>
+            <div class="secret-value"><div><input aria-label="New one-time SMTP password" readonly type="@(_showPassword ? "text" : "password")" value="@_newPassword" /><button class="button secondary" @onclick="() => _showPassword = !_showPassword">@(_showPassword ? "Hide" : "Show")</button><button class="button secondary" @onclick="() => CopyAsync(_newPassword)">Copy</button></div><strong>Save this password now. It will not be shown again after you refresh or leave this page.</strong></div>
+            <label class="acknowledgement"><input type="checkbox" @bind="_passwordSavedAcknowledged" /> <span>I saved the SMTP password</span></label>
+            <p class="guidance">If this password is lost, reset the device password to generate a new one.</p>
+        </section>
+    }
+
+    @if (_confirmEnabledChange)
+    {
+        <section class="action-panel danger-panel" tabindex="-1" @ref="_enabledPanel" aria-labelledby="enabled-heading">
+            <h2 id="enabled-heading">@(_item.Device.Enabled ? $"Disable {_item.Device.Name}?" : $"Enable {_item.Device.Name}?")</h2>
+            <p>@(_item.Device.Enabled ? "RelayBridge will reject new SMTP authentication or submissions from this device until it is enabled again." : "RelayBridge will allow this device to submit mail again under its existing restrictions.")</p>
+            <div class="actions"><button class="button @(_item.Device.Enabled ? "danger" : "primary")" disabled="@_mutationBusy" @onclick="ChangeEnabled">@(_item.Device.Enabled ? "Disable" : "Enable")</button><button class="button secondary" disabled="@_mutationBusy" @onclick="CancelEnabledConfirmation">Cancel</button></div>
+        </section>
+    }
+
+    <section class="settings-preview" aria-labelledby="settings-heading">
+        <div><p class="eyebrow">Printer configuration</p><h2 id="settings-heading">SMTP settings</h2></div>
+        @if (!_endpoint.IsLanReachable) { <div class="notice error">@_endpoint.Warning</div> }
+        <div class="setup-values compact-values">
+            <PrinterServerAddresses Advice="@_endpoint" OnCopy="CopyAsync" />
+            <SetupValue Label="Port" Value="@_endpoint.Port.ToString()" Copy="@(() => CopyAsync(_endpoint.Port.ToString()))" />
+            <SetupValue Label="Connection security" Value="None" />
+            <SetupValue Label="Authentication" Value="@(_item.Device.AuthenticationMode == DeviceAuthenticationMode.Authenticated ? "Enabled" : "Off — Legacy")" />
+            @if (_item.Device.SmtpUsername is not null) { <SetupValue Label="SMTP username" Value="@_item.Device.SmtpUsername" Copy="@(() => CopyAsync(_item.Device.SmtpUsername))" /> }
+            <SetupValue Label="From address" Value="@_item.Device.AllowedSenders[0]" Copy="@(() => CopyAsync(_item.Device.AllowedSenders[0]))" />
+        </div>
+        <div class="connection-security-note"><strong>On the printer</strong><p>Disable SSL/TLS and STARTTLS for this Printer → RelayBridge connection. Use these settings only on the configured trusted private LAN. RelayBridge still uses validated TLS and OAuth when sending to Microsoft 365.</p></div>
+        @if (_item.Device.AuthenticationMode == DeviceAuthenticationMode.Authenticated) { <p class="guidance">The password is intentionally unavailable. Reset it if the device needs a new one.</p> }
+    </section>
+}
+
+@code {
+    [Parameter] public Guid DeviceId { get; set; }
+    private DeviceOverviewItem? _item;
+    private DeviceEndpointAdvice _endpoint = null!;
+    private string? _notice;
+    private bool _error;
+    private bool _testing;
+    private DateTimeOffset? _testStarted;
+    private DeviceTestPresentation _testResult = DeviceTestPresentation.From(false, null);
+    private bool _editing;
+    private string _editName = string.Empty;
+    private string _editDescription = string.Empty;
+    private List<string> _editNetworks = [];
+    private bool _confirmReset;
+    private bool _confirmEnabledChange;
+    private string? _newPassword;
+    private bool _showPassword;
+    private bool _passwordSavedAcknowledged;
+    private bool _mutationBusy;
+    private ElementReference _editTrigger;
+    private ElementReference _editPanel;
+    private ElementReference _resetTrigger;
+    private ElementReference _enabledTrigger;
+    private ElementReference _resetPanel;
+    private ElementReference _enabledPanel;
+    private ElementReference _newPasswordPanel;
+    private bool _focusResetPanel;
+    private bool _focusEnabledPanel;
+    private bool _focusResetTrigger;
+    private bool _focusEnabledTrigger;
+    private bool _focusNewPassword;
+    private bool _focusEditPanel;
+    private bool _focusEditTrigger;
+
+    protected override void OnInitialized() { _endpoint = Endpoints.GetAdvice(); Reload(); }
+    private string StatusClass => _item!.Status switch { DeviceUiStatus.Ready => "ready", DeviceUiStatus.NeedsAttention => "attention", _ => "disabled" };
+    private string StatusSymbol => _item!.Status switch { DeviceUiStatus.Ready => "✓", DeviceUiStatus.NeedsAttention => "!", _ => "‖" };
+    private string StatusText => _item!.Status switch { DeviceUiStatus.Ready => "Ready", DeviceUiStatus.NeedsAttention => "Needs attention", _ => "Disabled" };
+    private string SecurityText => _item!.Device.AuthenticationMode == DeviceAuthenticationMode.Authenticated
+        ? "Authenticated SMTP + IP restriction (inbound TLS not available)"
+        : "Legacy — strict private-network and sender restriction";
+    private bool HasUnacknowledgedPassword => !OneTimeSecretExitPolicy.CanLeave(_newPassword, _passwordSavedAcknowledged);
+
+    private void Reload() => _item = Overview.GetDevice(DeviceId);
+    private void BeginEdit()
+    {
+        if (_mutationBusy || _editing) return;
+        _editing = true;
+        _editName = _item!.Device.Name;
+        _editDescription = _item.Device.Description ?? string.Empty;
+        _editNetworks = [.. _item.Device.AllowedNetworks];
+        _focusEditPanel = true;
+    }
+    private void StartTest() { _testing = true; _testStarted = DateTimeOffset.UtcNow; _testResult = DeviceTestPresentation.From(false, null); _notice = null; }
+    private void CheckTest()
+    {
+        Reload();
+        var localAccepted = _testStarted is not null && _item?.Activity.LastAcceptedUtc >= _testStarted;
+        _testResult = DeviceTestPresentation.From(localAccepted, _item?.Activity.LatestMessageState);
+        _notice = _testResult.Message;
+        _error = _testResult.IsFailure;
+    }
+
+    private void SaveEdit()
+    {
+        if (_mutationBusy || !_editing) return;
+        _mutationBusy = true;
+        var saved = RunMutation(
+            () => Devices.UpdateDevice(DeviceId, _editName, _editDescription, _editNetworks, _item!.Device.AllowedSenders, _item.Device.Revision),
+            "Device settings saved. Existing queued mail was not changed.");
+        _mutationBusy = false;
+        if (saved)
+        {
+            _editing = false;
+            _focusEditTrigger = true;
+        }
+    }
+
+    private void ResetPassword()
+    {
+        if (_mutationBusy || !_confirmReset || HasUnacknowledgedPassword) return;
+        _mutationBusy = true;
+        var reset = RunMutation(() => { var result = Devices.ResetPassword(DeviceId, _item!.Device.Revision); _newPassword = result.PlaintextPassword; _passwordSavedAcknowledged = false; return result.Device; }, "The old password has stopped working. Save the new password now.");
+        _mutationBusy = false;
+        _confirmReset = false;
+        if (reset && _newPassword is not null) _focusNewPassword = true;
+        else _focusResetTrigger = true;
+    }
+
+    private void ChangeEnabled()
+    {
+        if (_mutationBusy || !_confirmEnabledChange) return;
+        _mutationBusy = true;
+        var enabled = !_item!.Device.Enabled;
+        _ = RunMutation(() => Devices.SetEnabled(DeviceId, enabled, _item.Device.Revision), enabled ? "Device enabled." : "Device disabled. New SMTP sessions will be rejected.");
+        _mutationBusy = false;
+        _confirmEnabledChange = false;
+        _focusEnabledTrigger = true;
+    }
+
+    private void ShowResetConfirmation() { if (_mutationBusy || _confirmReset) return; _confirmReset = true; _focusResetPanel = true; }
+    private void ShowEnabledConfirmation() { if (_mutationBusy || _confirmEnabledChange) return; _confirmEnabledChange = true; _focusEnabledPanel = true; }
+    private void CancelEdit() { if (_mutationBusy) return; _editing = false; _focusEditTrigger = true; }
+    private void CancelResetConfirmation() { _confirmReset = false; _focusResetTrigger = true; }
+    private void CancelEnabledConfirmation() { _confirmEnabledChange = false; _focusEnabledTrigger = true; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusResetPanel) { _focusResetPanel = false; await _resetPanel.FocusAsync(); }
+        if (_focusEnabledPanel) { _focusEnabledPanel = false; await _enabledPanel.FocusAsync(); }
+        if (_focusResetTrigger) { _focusResetTrigger = false; await _resetTrigger.FocusAsync(); }
+        if (_focusEnabledTrigger) { _focusEnabledTrigger = false; await _enabledTrigger.FocusAsync(); }
+        if (_focusNewPassword) { _focusNewPassword = false; await _newPasswordPanel.FocusAsync(); }
+        if (_focusEditPanel) { _focusEditPanel = false; await _editPanel.FocusAsync(); }
+        if (_focusEditTrigger) { _focusEditTrigger = false; await _editTrigger.FocusAsync(); }
+    }
+
+    private Task ProtectOneTimePassword(LocationChangingContext context)
+    {
+        if (HasUnacknowledgedPassword)
+        {
+            context.PreventNavigation();
+            _notice = "Confirm that you saved the SMTP password before leaving. If it is lost, reset the device password to generate a new one.";
+            _error = true;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private bool RunMutation(Func<DeviceDefinition> action, string success)
+    {
+        try { _ = action(); Reload(); _notice = success; _error = false; return true; }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or FormatException) { _notice = exception.Message; _error = true; return false; }
+        catch (SqliteException) { _notice = "RelayBridge could not update this device. Its previous settings remain active."; _error = true; return false; }
+    }
+
+    private async Task CopyAsync(string text) { await JavaScript.InvokeVoidAsync("relayBridge.copyText", text); _notice = "Copied to the clipboard."; _error = false; }
+    private static string FormatDate(DateTimeOffset? value) => value is null ? "No messages yet" : value.Value.ToLocalTime().ToString("d MMM yyyy, h:mm tt");
+}

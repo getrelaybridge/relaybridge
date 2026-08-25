@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+     xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Bundle Name="RelayBridge Setup"
+          Manufacturer="RelayBridge Project"
+          Version="$(var.ProductVersion)"
+          UpgradeCode="B77CE570-DC49-4D85-9819-F85F866B16D8"
+          AboutUrl="https://getrelaybridge.com"
+          HelpUrl="https://getrelaybridge.com"
+          Compressed="yes">
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense"
+                                               LicenseUrl="https://aka.ms/devservicesagreement"
+                                               SuppressOptionsUI="yes"
+                                               ShowVersion="yes" />
+    </BootstrapperApplication>
+
+    <Variable Name="RelayBridgeAcceptMicrosoftGraphTerms"
+              Type="numeric"
+              Value="0"
+              bal:Overridable="yes" />
+    <util:RegistrySearch Id="RelayBridgeExternalToolingSearch"
+                         Variable="RelayBridgeExternalToolingIdentity"
+                         Root="HKLM"
+                         Key="SOFTWARE\RelayBridge\Installer"
+                         Value="ExternalToolingIdentity"
+                         Result="value"
+                         Bitness="always64" />
+    <util:RegistrySearch Id="RelayBridgeExternalToolingReleaseSearch"
+                         Variable="RelayBridgeExternalToolingRelease"
+                         Root="HKLM"
+                         Key="SOFTWARE\RelayBridge\Installer"
+                         Value="ExternalToolingRelease"
+                         Result="value"
+                         Bitness="always64" />
+    <bal:Condition Condition="WixBundleInstalled OR WixBundleUILevel = 4 OR RelayBridgeAcceptMicrosoftGraphTerms = 1 OR RelayBridgeExternalToolingIdentity = &quot;D037C6938C7389DFFCB2360899E7D715ADE0EBAE9EF515FC69AFA339B033CCF5&quot;"
+                   Message="Microsoft Graph package terms acceptance is required. For quiet or passive setup, explicitly set RelayBridgeAcceptMicrosoftGraphTerms=1." />
+
+    <netfx:DotNetCoreSearch RuntimeType="core"
+                            Platform="x64"
+                            MajorVersion="10"
+                            Variable="RelayBridgeDotNetCoreVersion" />
+    <netfx:DotNetCoreSearch RuntimeType="aspnet"
+                            Platform="x64"
+                            MajorVersion="10"
+                            Variable="RelayBridgeAspNetCoreVersion" />
+
+    <Chain>
+      <ExePackage Id="DotNetCoreRuntime1011"
+                  SourceFile="$(var.PrerequisiteRoot)\dotnet-runtime-10.0.11-win-x64.exe"
+                  InstallArguments="/install /quiet /norestart"
+                  RepairArguments="/repair /quiet /norestart"
+                  UninstallArguments="/uninstall /quiet /norestart"
+                  DetectCondition="RelayBridgeDotNetCoreVersion &gt;= v10.0.11"
+                  InstallCondition="VersionNT64 AND VersionNT64 &gt;= v6.3"
+                  PerMachine="yes"
+                  Permanent="yes"
+                  Vital="yes"
+                  Cache="remove" />
+      <ExePackage Id="AspNetCoreRuntime1011"
+                  SourceFile="$(var.PrerequisiteRoot)\aspnetcore-runtime-10.0.11-win-x64.exe"
+                  InstallArguments="/install /quiet /norestart"
+                  RepairArguments="/repair /quiet /norestart"
+                  UninstallArguments="/uninstall /quiet /norestart"
+                  DetectCondition="RelayBridgeAspNetCoreVersion &gt;= v10.0.11"
+                  InstallCondition="VersionNT64 AND VersionNT64 &gt;= v6.3"
+                  PerMachine="yes"
+                  Permanent="yes"
+                  Vital="yes"
+                  Cache="remove" />
+      <MsiPackage Id="RelayBridgeMsi"
+                  SourceFile="$(var.PackageRoot)\RelayBridge-$(var.ProductVersion)-win-x64.msi"
+                  Visible="no"
+                  Vital="yes">
+        <MsiProperty Name="RELAYBRIDGE_EXTERNAL_TOOLING_TRANSACTION"
+                     Value="D037C6938C7389DFFCB2360899E7D715ADE0EBAE9EF515FC69AFA339B033CCF5" />
+      </MsiPackage>
+      <PackageGroupRef Id="RelayBridgeExternalMicrosoftModules" />
+    </Chain>
+  </Bundle>
+</Wix>

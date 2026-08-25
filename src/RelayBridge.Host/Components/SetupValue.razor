@@ -1,0 +1,17 @@
+@* SPDX-License-Identifier: MPL-2.0 *@
+
+<div class="setup-value">
+    <span>@Label</span>
+    <strong>@Value</strong>
+    @if (Copy.HasDelegate)
+    {
+        <button class="button secondary no-print" disabled="@(!CopyEnabled)" @onclick="Copy">Copy</button>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Value { get; set; } = string.Empty;
+    [Parameter] public EventCallback Copy { get; set; }
+    [Parameter] public bool CopyEnabled { get; set; } = true;
+}

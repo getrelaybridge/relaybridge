@@ -1,0 +1,115 @@
+@* SPDX-License-Identifier: MPL-2.0 *@
+
+@page "/settings"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@using Microsoft.Extensions.Options
+@using RelayBridge.Infrastructure.Smtp
+@inject IOptions<SmtpListenerOptions> Listener
+@inject DeviceEndpointAdvisor Endpoints
+
+<PageTitle>Settings · RelayBridge</PageTitle>
+
+<div class="page-heading"><div><p class="eyebrow">Local service</p><h1>Settings</h1><p class="lead">Current listener, printer-connectivity requirements, and management safety boundaries.</p></div></div>
+
+<section id="printer-connectivity" class="settings-preview" aria-labelledby="printer-connectivity-heading">
+    <div><p class="eyebrow">Required before adding an authenticated printer</p><h2 id="printer-connectivity-heading">Printer connectivity</h2></div>
+    @if (Advice.IsAuthenticatedSmtpAvailable)
+    {
+        <div class="notice success" role="status">Authenticated printer SMTP is ready on the configured trusted private LAN.</div>
+    }
+    else
+    {
+        <div class="warning-panel">
+            <strong>Deployment configuration and restart required</strong>
+            <p>The SMTP listener is bound only when RelayBridge starts. Update the service deployment configuration with an explicit private address, enable compatible SMTP authentication, and restart RelayBridge. This page does not change the running listener.</p>
+        </div>
+    }
+
+    <dl class="stacked-details connectivity-details">
+        <div><dt>Current listener</dt><dd><code>@Listener.Value.ListenAddress:@Listener.Value.Port</code></dd></div>
+        <div><dt>LAN printer reachability</dt><dd>@(Advice.IsLanReachable ? "Ready" : "Needs attention")</dd></div>
+        <div><dt>Authenticated printer SMTP</dt><dd>@(Advice.IsAuthenticatedSmtpAvailable ? "Ready" : "Needs attention")</dd></div>
+        <div><dt>Inbound TLS</dt><dd>Not available</dd></div>
+    </dl>
+
+    @if (!Advice.IsAuthenticatedSmtpAvailable)
+    {
+        <h3>Available private interfaces</h3>
+        @if (Advice.AvailableCandidates.Count == 0)
+        {
+            <p class="guidance">No active private LAN interface was found. Connect this server to the printer's trusted private network before configuring the listener.</p>
+        }
+        else
+        {
+            <p class="guidance">Choose the explicit address reachable from the printers. RelayBridge cannot prove printer reachability, and private virtual or VPN interfaces may not be usable from the printer network. Do not use a public address or <code>0.0.0.0</code>.</p>
+            <ul class="address-list">
+                @foreach (var candidate in Advice.AvailableCandidates)
+                {
+                    <li>
+                        @if (Advice.AvailableCandidates.Count > 1)
+                        {
+                            <input type="radio" name="printer-interface" value="@candidate.Address" checked="@(_selectedAddress == candidate.Address.ToString())" @onchange="() => _selectedAddress = candidate.Address.ToString()" aria-label="@($"Use {candidate.Address} on {candidate.InterfaceName}")" />
+                        }
+                        <code>@candidate.Address</code><span>@candidate.InterfaceName · @candidate.InterfaceType</span>
+                    </li>
+                }
+            </ul>
+            @if (_selectedAddress is null)
+            {
+                <p class="notice" role="status">Select the private interface that the printers can reach before RelayBridge generates deployment configuration.</p>
+            }
+            else
+            {
+                <p>Save this complete JSON document as a RelayBridge configuration override, then restart RelayBridge:</p>
+                <pre class="configuration-example"><code>@ConfigurationExample</code></pre>
+            }
+        }
+    }
+
+    <div class="warning-panel">
+        <strong>Trusted private LAN only</strong>
+        <p>Inbound STARTTLS is not available yet. Enabling SMTP authentication here sends the printer's reusable username and password without TLS on the local network. Keep the listener on one explicit trusted private interface and retain every device's IP and sender restrictions.</p>
+    </div>
+</section>
+
+<section class="detail-grid">
+    <article class="detail-card">
+        <h2>SMTP listener</h2>
+        <dl class="stacked-details">
+            <div><dt>Address</dt><dd><code>@Listener.Value.ListenAddress</code></dd></div>
+            <div><dt>Port</dt><dd>@Listener.Value.Port</dd></div>
+            <div><dt>SMTP authentication</dt><dd>@(Listener.Value.AllowCleartextAuthentication ? "Enabled on trusted LAN" : "Disabled")</dd></div>
+            <div><dt>Inbound STARTTLS</dt><dd>Not available</dd></div>
+            <div><dt>Maximum message</dt><dd>@FormatBytes(Listener.Value.MaxMessageBytes)</dd></div>
+        </dl>
+    </article>
+    <article class="detail-card">
+        <h2>Management</h2>
+        <dl class="stacked-details">
+            <div><dt>Web access</dt><dd>Local computer only</dd></div>
+            <div><dt>Printer address available</dt><dd>@(Advice.IsLanReachable ? "Yes" : "No")</dd></div>
+        </dl>
+        <p class="card-note">The management site remains loopback-only. SMTP listener and management binding are separate security surfaces.</p>
+    </article>
+</section>
+
+<div class="warning-panel">
+    <strong>Trusted-LAN compatibility</strong>
+    <p>Inbound TLS certificate provisioning is deferred. Do not expose RelayBridge SMTP to the Internet. Cleartext device authentication, when deliberately enabled, is suitable only for a trusted private network with strict per-device IP and sender restrictions.</p>
+</div>
+
+@code {
+    private DeviceEndpointAdvice Advice = null!;
+    private string? _selectedAddress;
+    protected override void OnInitialized()
+    {
+        Advice = Endpoints.GetAdvice();
+        if (Advice.AvailableCandidates.Count == 1)
+        {
+            _selectedAddress = Advice.AvailableCandidates[0].Address.ToString();
+        }
+    }
+    private string ConfigurationExample =>
+        SmtpDeploymentConfiguration.Create(_selectedAddress!, Listener.Value.Port);
+    private static string FormatBytes(long bytes) => $"{bytes / (1024d * 1024d):0.#} MiB";
+}

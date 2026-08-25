@@ -1,0 +1,288 @@
+@* SPDX-License-Identifier: MPL-2.0 *@
+
+@page "/"
+@using RelayBridge.Core.Microsoft
+@using RelayBridge.Infrastructure.Microsoft
+@using RelayBridge.Infrastructure.Smtp
+@using RelayBridge.Infrastructure.Storage
+@using Microsoft.Extensions.Diagnostics.HealthChecks
+@using Microsoft.Extensions.Options
+@inject DeviceOverviewService Overview
+@inject MicrosoftIdentityRuntimeState MicrosoftIdentity
+@inject ExchangeDeliveryRuntimeState ExchangeDelivery
+@inject HealthCheckService HealthChecks
+@inject IOptions<SmtpListenerOptions> ListenerOptions
+@inject DeviceEndpointAdvisor Endpoints
+
+<PageTitle>Dashboard · RelayBridge</PageTitle>
+
+<div class="page-heading">
+    <div>
+        <p class="eyebrow">Local mail appliance</p>
+        <h1>Dashboard</h1>
+        <p class="lead">@DashboardLead</p>
+    </div>
+    <a class="button primary" href="@PrimaryActionHref">@PrimaryActionLabel</a>
+</div>
+
+<section class="health-banner" aria-label="Relay status">
+    <span class="status-dot @LocalStatusClass" aria-hidden="true">@LocalStatusSymbol</span>
+    <div><strong>@LocalStatus</strong><span>@LocalStatusNote</span></div>
+</section>
+
+<section class="dashboard-grid" aria-label="RelayBridge summary">
+    <article class="summary-card">
+        <div class="card-heading"><h2>Microsoft 365</h2><a href="/setup/microsoft">Manage</a></div>
+        <p class="status-line @MicrosoftStatusClass"><span aria-hidden="true">@MicrosoftStatusSymbol</span> @MicrosoftStatus</p>
+        @if (!string.IsNullOrWhiteSpace(_snapshot.ActiveSender))
+        {
+            <dl class="compact-details"><div><dt>Sender</dt><dd>@_snapshot.ActiveSender</dd></div></dl>
+        }
+        <p class="card-note">@MicrosoftStatusNote</p>
+    </article>
+
+    <article class="summary-card">
+        <div class="card-heading"><h2>Devices</h2><a href="/devices">View all</a></div>
+        <p class="metric">@_snapshot.Devices.Count <span>configured</span></p>
+        <p class="card-note">@ReadyCount ready · @AttentionCount need attention · @DisabledCount disabled</p>
+    </article>
+
+    <article class="summary-card">
+        <div class="card-heading"><h2>Printer connectivity</h2><a href="/settings#printer-connectivity">Prepare</a></div>
+        <p class="status-line @ConnectivityStatusClass"><span aria-hidden="true">@ConnectivityStatusSymbol</span> @ConnectivityStatus</p>
+        <dl class="compact-details">
+            <div><dt>LAN listener</dt><dd>@(_endpointAdvice.IsLanReachable ? "Ready" : "Needs attention")</dd></div>
+            <div><dt>SMTP authentication</dt><dd>@(_endpointAdvice.IsAuthenticatedSmtpAvailable ? "Ready" : "Needs attention")</dd></div>
+            <div><dt>Inbound TLS</dt><dd>Not available</dd></div>
+        </dl>
+        <p class="card-note">@ConnectivityNote</p>
+    </article>
+
+    <article class="summary-card">
+        <div class="card-heading"><h2>Queue</h2></div>
+        <p class="status-line @QueueStatusClass"><span aria-hidden="true">@QueueStatusSymbol</span> @QueueStatus</p>
+        <p class="metric">@WaitingCount <span>waiting</span></p>
+        <p class="card-note">@QueueNote</p>
+    </article>
+
+    <article class="summary-card">
+        <div class="card-heading"><h2>Today</h2></div>
+        <p class="metric">@_snapshot.Today.Delivered <span>delivered</span></p>
+        <p class="card-note">@_snapshot.Today.PermanentFailures failed permanently</p>
+    </article>
+</section>
+
+<section class="recent-section" aria-labelledby="recent-devices">
+    <div class="section-heading">
+        <div><p class="eyebrow">Recent status</p><h2 id="recent-devices">Devices</h2></div>
+        <a href="/devices">All devices</a>
+    </div>
+    @if (_snapshot.Devices.Count == 0)
+    {
+        <div class="empty-state">
+            <h3>No devices yet</h3>
+            <p>Add your first printer, scanner, NAS, or legacy SMTP application.</p>
+            <a class="button primary" href="@PrimaryActionHref">@PrimaryActionLabel</a>
+        </div>
+    }
+    else
+    {
+        <div class="device-rows">
+            @foreach (var item in _snapshot.Devices.Take(5))
+            {
+                <a class="device-row" href="@($"/devices/{item.Device.Id:D}")">
+                    <span class="status-dot @StatusClass(item.Status)" aria-hidden="true">@StatusSymbol(item.Status)</span>
+                    <span><strong>@item.Device.Name</strong><small>@SecurityLabel(item.Device.AuthenticationMode)</small></span>
+                    <span class="row-activity">@ActivityText(item)</span>
+                    <span class="status-text">@StatusText(item.Status)</span>
+                </a>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    private DeviceOverviewSnapshot _snapshot = null!;
+    private DeviceEndpointAdvice _endpointAdvice = null!;
+    private HealthStatus _localHealth = HealthStatus.Unhealthy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _snapshot = Overview.GetSnapshot();
+        _endpointAdvice = Endpoints.GetAdvice();
+        _localHealth = (await HealthChecks.CheckHealthAsync()).Status;
+    }
+
+    private bool MicrosoftConfigured => !string.IsNullOrWhiteSpace(_snapshot.ActiveSender);
+    private MicrosoftRuntimeReadiness MicrosoftReadiness => MicrosoftRuntimeReadinessPolicy.Evaluate(
+        MicrosoftConfigured,
+        _snapshot.ActiveMicrosoftConfigurationFingerprint,
+        MicrosoftIdentity,
+        ExchangeDelivery);
+    private bool MicrosoftReady => MicrosoftReadiness == MicrosoftRuntimeReadiness.Ready;
+    private DeviceSetupReadiness Readiness => new(
+        MicrosoftConfigured,
+        MicrosoftReady,
+        _endpointAdvice.IsLanReachable,
+        _endpointAdvice.IsAuthenticatedSmtpAvailable,
+        InboundTlsAvailable: false);
+
+    private bool LocalReady => _localHealth == HealthStatus.Healthy && _endpointAdvice.IsLanReachable;
+    private string LocalStatus => LocalReady ? "Ready" : "Needs attention";
+    private string LocalStatusClass => LocalReady ? "ready" : "attention";
+    private string LocalStatusSymbol => LocalReady ? "✓" : "!";
+    private string LocalStatusNote => _localHealth != HealthStatus.Healthy
+        ? "Local database, spool, capacity, or queue worker needs attention."
+        : !ListenerOptions.Value.Enabled
+            ? "The local SMTP listener is disabled."
+            : !_endpointAdvice.IsLanReachable
+                ? "Local services are running, but a physical printer cannot reach the current SMTP listener."
+                : "Local database, spool, capacity, queue worker, and LAN SMTP listener are available.";
+
+    private string DashboardLead => _localHealth != HealthStatus.Healthy
+        ? "RelayBridge is running, but a local service needs attention."
+        : MicrosoftReadiness == MicrosoftRuntimeReadiness.NotConfigured
+            ? "Set up Microsoft 365 before adding production devices."
+            : MicrosoftReadiness == MicrosoftRuntimeReadiness.VerificationRequired
+                ? "Microsoft 365 verification is required after this service start before adding a device."
+            : !_endpointAdvice.IsLanReachable || !_endpointAdvice.IsAuthenticatedSmtpAvailable
+                ? "Microsoft 365 is configured. Prepare trusted-LAN printer connectivity before adding an authenticated device."
+                : "RelayBridge is ready for devices on the configured trusted private LAN.";
+
+    private string PrimaryActionLabel => Readiness.PrimaryAction switch
+    {
+        DeviceSetupPrimaryAction.SetUpMicrosoft365 => "Set up Microsoft 365",
+        DeviceSetupPrimaryAction.RepairMicrosoft365 when MicrosoftReadiness == MicrosoftRuntimeReadiness.VerificationRequired => "Verify Microsoft 365",
+        DeviceSetupPrimaryAction.RepairMicrosoft365 => "Repair Microsoft 365",
+        DeviceSetupPrimaryAction.PreparePrinterConnectivity => "Prepare printer connectivity",
+        _ => "Add device",
+    };
+
+    private string PrimaryActionHref => Readiness.PrimaryAction switch
+    {
+        DeviceSetupPrimaryAction.SetUpMicrosoft365 or DeviceSetupPrimaryAction.RepairMicrosoft365 => "/setup/microsoft",
+        DeviceSetupPrimaryAction.PreparePrinterConnectivity => "/settings#printer-connectivity",
+        _ => "/devices/add",
+    };
+
+    private int ReadyCount => _snapshot.Devices.Count(item => item.Status == DeviceUiStatus.Ready);
+    private int AttentionCount => _snapshot.Devices.Count(item => item.Status == DeviceUiStatus.NeedsAttention);
+    private int DisabledCount => _snapshot.Devices.Count(item => item.Status == DeviceUiStatus.Disabled);
+    private int WaitingCount => _snapshot.Queue.QueuedCount + _snapshot.Queue.RetryScheduledCount;
+    private int ActiveQueueCount => WaitingCount + _snapshot.Queue.DeliveringCount;
+    private string QueueStatus => _snapshot.Queue.PermanentFailureCount > 0
+        ? "Needs attention"
+        : _snapshot.Queue.DeliveringCount > 0 ? "Delivering" : WaitingCount > 0 ? "Waiting" : "Clear";
+    private string QueueStatusClass => _snapshot.Queue.PermanentFailureCount > 0
+        ? "attention"
+        : ActiveQueueCount > 0 ? "neutral" : "ready";
+    private string QueueStatusSymbol => _snapshot.Queue.PermanentFailureCount > 0
+        ? "!"
+        : ActiveQueueCount > 0 ? "·" : "✓";
+    private string QueueNote => _snapshot.Queue.DeliveringCount > 0
+        ? $"{_snapshot.Queue.DeliveringCount} message{(_snapshot.Queue.DeliveringCount == 1 ? " is" : "s are")} actively being delivered."
+        : WaitingCount == 0
+        ? "No messages waiting."
+        : _snapshot.Queue.OldestQueuedUtc is null
+            ? "Messages are safe and will retry automatically."
+            : $"Oldest message {FormatRelative(_snapshot.Queue.OldestQueuedUtc.Value)}. Messages are safe and will retry automatically.";
+
+    private string MicrosoftStatus => MicrosoftReadiness switch
+    {
+        MicrosoftRuntimeReadiness.Ready => "Ready",
+        MicrosoftRuntimeReadiness.NeedsAttention => "Needs attention",
+        MicrosoftRuntimeReadiness.VerificationRequired => "Verification required",
+        _ => "Not configured",
+    };
+
+    private string MicrosoftStatusClass => MicrosoftReadiness switch
+    {
+        MicrosoftRuntimeReadiness.Ready => "ready",
+        MicrosoftRuntimeReadiness.NeedsAttention => "attention",
+        _ => "neutral",
+    };
+
+    private string MicrosoftStatusSymbol => MicrosoftReadiness switch
+    {
+        MicrosoftRuntimeReadiness.Ready => "✓",
+        MicrosoftRuntimeReadiness.NeedsAttention => "!",
+        _ => "·",
+    };
+
+    private MicrosoftIdentityHealthSnapshot ActiveIdentityEvidence =>
+        MicrosoftIdentity.GetCompletedSnapshot(_snapshot.ActiveMicrosoftConfigurationFingerprint);
+    private ExchangeDeliverySnapshot ActiveExchangeEvidence =>
+        ExchangeDelivery.GetCompletedSnapshot(_snapshot.ActiveMicrosoftConfigurationFingerprint);
+    private string MicrosoftStatusNote => MicrosoftReadiness switch
+    {
+        MicrosoftRuntimeReadiness.Ready when
+            ActiveExchangeEvidence.Status == ExchangeDeliveryStatus.Healthy &&
+            ActiveExchangeEvidence.LastSuccessfulAt is not null &&
+            (ActiveExchangeEvidence.CompletionSequence ?? 0) >=
+                (ActiveIdentityEvidence.CompletionSequence ?? 0) =>
+            $"Last accepted by Microsoft 365 {FormatRelative(ActiveExchangeEvidence.LastSuccessfulAt.Value)}.",
+        MicrosoftRuntimeReadiness.Ready =>
+            "Microsoft application identity was verified during this service start.",
+        MicrosoftRuntimeReadiness.NeedsAttention when
+            ActiveExchangeEvidence.Status == ExchangeDeliveryStatus.Ambiguous =>
+            "The newest Exchange delivery outcome was uncertain. Open Microsoft 365 setup for details.",
+        MicrosoftRuntimeReadiness.NeedsAttention when
+            ActiveExchangeEvidence.Status == ExchangeDeliveryStatus.Failed &&
+            (ActiveExchangeEvidence.CompletionSequence ?? 0) >=
+                (ActiveIdentityEvidence.CompletionSequence ?? 0) =>
+            "The newest Exchange SMTP check failed. Open Microsoft 365 setup to repair it.",
+        MicrosoftRuntimeReadiness.NeedsAttention =>
+            "Microsoft application authentication needs attention.",
+        MicrosoftRuntimeReadiness.VerificationRequired =>
+            "Active configuration exists, but identity and Exchange sender verification have not succeeded during this service start.",
+        _ => "Connect Microsoft 365 before adding production devices.",
+    };
+
+    private string ConnectivityStatus => _endpointAdvice.IsAuthenticatedSmtpAvailable ? "Ready" : "Needs attention";
+    private string ConnectivityStatusClass => _endpointAdvice.IsAuthenticatedSmtpAvailable ? "ready" : "attention";
+    private string ConnectivityStatusSymbol => _endpointAdvice.IsAuthenticatedSmtpAvailable ? "✓" : "!";
+    private string ConnectivityNote => !_endpointAdvice.IsLanReachable
+        ? "The current listener cannot be reached by a physical printer."
+        : !_endpointAdvice.IsAuthenticatedSmtpAvailable
+            ? "LAN access is available, but authenticated printer SMTP is disabled."
+            : "Authenticated printer SMTP is available on the trusted private LAN.";
+
+    private static string StatusClass(DeviceUiStatus status) => status switch
+    {
+        DeviceUiStatus.Ready => "ready",
+        DeviceUiStatus.NeedsAttention => "attention",
+        _ => "disabled",
+    };
+
+    private static string StatusSymbol(DeviceUiStatus status) => status switch
+    {
+        DeviceUiStatus.Ready => "✓",
+        DeviceUiStatus.NeedsAttention => "!",
+        _ => "‖",
+    };
+
+    private static string StatusText(DeviceUiStatus status) => status switch
+    {
+        DeviceUiStatus.Ready => "Ready",
+        DeviceUiStatus.NeedsAttention => "Needs attention",
+        _ => "Disabled",
+    };
+
+    private static string SecurityLabel(RelayBridge.Core.Devices.DeviceAuthenticationMode mode) =>
+        mode == RelayBridge.Core.Devices.DeviceAuthenticationMode.Authenticated
+            ? "Authenticated SMTP"
+            : "Legacy network-restricted";
+
+    private static string ActivityText(DeviceOverviewItem item) => item.Activity.LastAcceptedUtc is null
+        ? "No messages yet"
+        : $"Last message {FormatRelative(item.Activity.LastAcceptedUtc.Value)}";
+
+    private static string FormatRelative(DateTimeOffset value)
+    {
+        var elapsed = DateTimeOffset.UtcNow - value.ToUniversalTime();
+        if (elapsed < TimeSpan.FromMinutes(1)) return "just now";
+        if (elapsed < TimeSpan.FromHours(1)) return $"{Math.Max(1, (int)elapsed.TotalMinutes)} minutes ago";
+        if (elapsed < TimeSpan.FromDays(1)) return $"{Math.Max(1, (int)elapsed.TotalHours)} hours ago";
+        return value.ToLocalTime().ToString("d MMM, h:mm tt");
+    }
+}

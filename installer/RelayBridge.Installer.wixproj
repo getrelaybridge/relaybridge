@@ -1,0 +1,28 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+
+<Project Sdk="WixToolset.Sdk/6.0.2">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <Platform>x64</Platform>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <OutputName>RelayBridge-$(ProductVersion)-win-x64</OutputName>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.9.2</ProductVersion>
+    <StageRoot Condition="'$(StageRoot)' == ''">$(MSBuildThisFileDirectory)..\artifacts\installer\stage</StageRoot>
+    <SuppressValidation>false</SuppressValidation>
+    <!-- e_sqlite3.dll has no version-language resource; ICE60 still validates the authored default. -->
+    <SuppressSpecificWarnings>1101</SuppressSpecificWarnings>
+    <WixToolsetProjectName>RelayBridge</WixToolsetProjectName>
+    <DefineConstants>ProductVersion=$(ProductVersion);StageRoot=$(StageRoot)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Netfx.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Package.wxs" />
+    <Compile Include="$(StageRoot)\GeneratedFiles.wxs" Link="GeneratedFiles.wxs" />
+  </ItemGroup>
+</Project>

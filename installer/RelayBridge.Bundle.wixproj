@@ -1,0 +1,30 @@
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+
+<Project Sdk="WixToolset.Sdk/6.0.2">
+  <PropertyGroup>
+    <OutputType>Bundle</OutputType>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <Platform>x64</Platform>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <OutputName>RelayBridge-Setup-$(ProductVersion)-win-x64</OutputName>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.9.1</ProductVersion>
+    <PackageRoot Condition="'$(PackageRoot)' == ''">$(MSBuildThisFileDirectory)..\artifacts\installer\package</PackageRoot>
+    <PrerequisiteRoot Condition="'$(PrerequisiteRoot)' == ''">$(MSBuildThisFileDirectory)..\artifacts\installer\prerequisites</PrerequisiteRoot>
+    <ProvisionerPath Condition="'$(ProvisionerPath)' == ''">$(MSBuildThisFileDirectory)..\artifacts\installer\publish\Provisioner\RelayBridge.ToolingProvisioner.exe</ProvisionerPath>
+    <ToolingManifestPath Condition="'$(ToolingManifestPath)' == ''">$(MSBuildThisFileDirectory)..\artifacts\installer\stage\Tooling\tooling-manifest.json</ToolingManifestPath>
+    <GeneratedAcquisitionSource Condition="'$(GeneratedAcquisitionSource)' == ''">$(MSBuildThisFileDirectory)..\artifacts\installer\stage\GeneratedAcquisition.wxs</GeneratedAcquisitionSource>
+    <DefineConstants>ProductVersion=$(ProductVersion);PackageRoot=$(PackageRoot);PrerequisiteRoot=$(PrerequisiteRoot);ProvisionerPath=$(ProvisionerPath);ToolingManifestPath=$(ToolingManifestPath)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Bal.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.Netfx.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Bundle.wxs" />
+    <Compile Include="$(GeneratedAcquisitionSource)" Link="GeneratedAcquisition.wxs" />
+    <EmbeddedResource Include="Bundle.en-us.wxl" />
+  </ItemGroup>
+</Project>

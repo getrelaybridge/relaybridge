@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="RelayBridge"
+           Manufacturer="RelayBridge Project"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="6F546D3A-57EE-4E57-A724-89E78374DC81"
+           Language="1033"
+           Codepage="1252"
+           Scope="perMachine"
+           InstallerVersion="500"
+           Compressed="yes">
+    <SummaryInformation Description="RelayBridge local SMTP-to-Microsoft-365 OAuth relay"
+                        Manufacturer="RelayBridge Project" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <MajorUpgrade DowngradeErrorMessage="A newer RelayBridge version is already installed."
+                  Schedule="afterInstallInitialize" />
+
+    <Property Id="ARPCONTACT" Value="RelayBridge Project" />
+    <Property Id="ARPURLINFOABOUT" Value="https://getrelaybridge.com" />
+    <Property Id="ARPHELPLINK" Value="https://getrelaybridge.com" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="RELAYBRIDGE_EXTERNAL_TOOLING_TRANSACTION" Secure="yes" />
+    <Property Id="RELAYBRIDGE_EXTERNAL_TOOLING_IDENTITY">
+      <RegistrySearch Id="RelayBridgeExternalToolingRegistrySearch"
+                      Root="HKLM"
+                      Key="SOFTWARE\RelayBridge\Installer"
+                      Name="ExternalToolingIdentity"
+                      Type="raw"
+                      Bitness="always64" />
+    </Property>
+
+    <Launch Condition="VersionNT64 AND VersionNT64 &gt;= 603 AND MsiNTProductType = 1"
+            Message="RelayBridge supports Windows 10 or Windows 11 x64." />
+    <Launch Condition="Installed OR (RELAYBRIDGE_DOTNET_CORE_CHECK = 0 AND RELAYBRIDGE_DOTNET_ASPNET_CHECK = 0)"
+            Message="RelayBridge requires the Microsoft .NET 10 x64 Runtime and ASP.NET Core Runtime. Run RelayBridge-Setup instead of the MSI, or install both prerequisites." />
+    <Launch Condition="Installed OR RELAYBRIDGE_EXTERNAL_TOOLING_IDENTITY = &quot;D037C6938C7389DFFCB2360899E7D715ADE0EBAE9EF515FC69AFA339B033CCF5&quot; OR RELAYBRIDGE_EXTERNAL_TOOLING_TRANSACTION = &quot;D037C6938C7389DFFCB2360899E7D715ADE0EBAE9EF515FC69AFA339B033CCF5&quot;"
+            Message="Required Microsoft setup components are not installed. Run RelayBridge-Setup.exe instead of the MSI." />
+
+    <netfx:DotNetCompatibilityCheck Property="RELAYBRIDGE_DOTNET_CORE_CHECK"
+                                     RuntimeType="core"
+                                     Platform="x64"
+                                     Version="10.0.0"
+                                     RollForward="latestPatch" />
+    <netfx:DotNetCompatibilityCheck Property="RELAYBRIDGE_DOTNET_ASPNET_CHECK"
+                                     RuntimeType="aspnet"
+                                     Platform="x64"
+                                     Version="10.0.0"
+                                     RollForward="latestPatch" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="RelayBridge">
+        <Directory Id="HOSTDIR" Name="Host" />
+        <Directory Id="SETUPDIR" Name="Setup" />
+        <Directory Id="TOOLINGDIR" Name="Tooling" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="PROGRAMDATAROOT" Name="RelayBridge">
+        <Directory Id="DATADIR" Name="Data" />
+        <Directory Id="SCRATCHDIR" Name="SetupScratch" />
+      </Directory>
+    </StandardDirectory>
+
+    <DirectoryRef Id="HOSTDIR">
+      <Component Id="RelayBridgeServiceComponent" Guid="86A7287A-4B29-4FD3-94CE-C32D07FB35AF" Bitness="always64">
+        <File Id="RelayBridgeHostExe"
+              Source="$(var.StageRoot)\Host\RelayBridge.Host.exe"
+              KeyPath="yes"
+              Checksum="yes" />
+        <ServiceInstall Id="RelayBridgeServiceInstall"
+                        Name="RelayBridge"
+                        DisplayName="RelayBridge"
+                        Description="Local SMTP-to-Microsoft-365 OAuth relay"
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Vital="yes">
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="none"
+                              ResetPeriodInDays="1"
+                              RestartServiceDelayInSeconds="15" />
+        </ServiceInstall>
+        <ServiceControl Id="RelayBridgeServiceControl"
+                        Name="RelayBridge"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="PROGRAMDATAROOT">
+      <Component Id="ProgramDataRootComponent"
+                 Guid="0D58C4EA-43C9-4EDC-A059-C06219318B66"
+                 Bitness="always64"
+                 Permanent="yes"
+                 NeverOverwrite="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYG:SYD:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)(A;OICI;GRGX;;;BU)" />
+        </CreateFolder>
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="DATADIR">
+      <Component Id="ProgramDataDataComponent"
+                 Guid="AEB2B977-2F69-4B6A-B41F-BC6C8BAEE114"
+                 Bitness="always64"
+                 Permanent="yes"
+                 NeverOverwrite="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYG:SYD:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)" />
+        </CreateFolder>
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="SCRATCHDIR">
+      <Component Id="ProgramDataScratchComponent"
+                 Guid="AA04592B-E5FE-453A-A37A-074F38BD55EA"
+                 Bitness="always64"
+                 Permanent="yes"
+                 NeverOverwrite="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYG:SYD:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)(A;OICI;GRGX;;;BU)" />
+        </CreateFolder>
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="RelayBridgeProtocolComponent"
+                 Guid="2190E49B-B088-416C-A993-376D057D26DF"
+                 Bitness="always64">
+        <RegistryKey Root="HKLM" Key="Software\Classes\relaybridge-setup" ForceDeleteOnUninstall="yes">
+          <RegistryValue Type="string" Value="URL:RelayBridge Microsoft Setup" KeyPath="yes" />
+          <RegistryValue Name="URL Protocol" Type="string" Value="" />
+          <RegistryKey Key="DefaultIcon">
+            <RegistryValue Type="string" Value="[SETUPDIR]RelayBridge.SetupLauncher.exe,0" />
+          </RegistryKey>
+          <RegistryKey Key="shell\open\command">
+            <RegistryValue Type="string"
+                           Value="&quot;[SETUPDIR]RelayBridge.SetupLauncher.exe&quot; &quot;%1&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="RelayBridgeFeature" Title="RelayBridge" Level="1" AllowAbsent="no">
+      <ComponentGroupRef Id="RelayBridgePayload" />
+      <ComponentRef Id="RelayBridgeServiceComponent" />
+      <ComponentRef Id="ProgramDataRootComponent" />
+      <ComponentRef Id="ProgramDataDataComponent" />
+      <ComponentRef Id="ProgramDataScratchComponent" />
+      <ComponentRef Id="RelayBridgeProtocolComponent" />
+    </Feature>
+  </Package>
+</Wix>

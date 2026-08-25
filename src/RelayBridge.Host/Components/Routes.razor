@@ -1,0 +1,15 @@
+@* SPDX-License-Identifier: MPL-2.0 *@
+
+<Router AppAssembly="typeof(Program).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" />
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <PageTitle>Not found · RelayBridge</PageTitle>
+        <LayoutView Layout="typeof(MainLayout)">
+            <h1>Page not found</h1>
+            <p>The requested local page does not exist.</p>
+        </LayoutView>
+    </NotFound>
+</Router>

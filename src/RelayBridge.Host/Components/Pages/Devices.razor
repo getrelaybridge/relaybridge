@@ -1,0 +1,105 @@
+@* SPDX-License-Identifier: MPL-2.0 *@
+
+@page "/devices"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@using RelayBridge.Core.Devices
+@using RelayBridge.Infrastructure.Storage
+@inject DeviceOverviewService Overview
+
+<PageTitle>Devices · RelayBridge</PageTitle>
+
+<div class="page-heading">
+    <div><p class="eyebrow">Printer and device access</p><h1>Devices</h1><p class="lead">Manage the equipment and applications allowed to submit email through RelayBridge.</p></div>
+    <a class="button primary" href="/devices/add">Add device</a>
+</div>
+
+@if (_snapshot.Devices.Count == 0)
+{
+    <section class="empty-state prominent-empty">
+        <h2>No devices yet</h2>
+        <p>Add your first printer, scanner, NAS, monitoring appliance, or legacy SMTP application.</p>
+        <a class="button primary" href="/devices/add">Add device</a>
+    </section>
+}
+else
+{
+    <div class="list-toolbar">
+        <label for="device-search">Search devices</label>
+        <input id="device-search" type="search" placeholder="Name, username, or IP address" @bind="_search" @bind:event="oninput" />
+        <span>@FilteredDevices.Count device@(FilteredDevices.Count == 1 ? string.Empty : "s")</span>
+    </div>
+
+    @if (FilteredDevices.Count == 0)
+    {
+        <section class="empty-state"><h2>No matching devices</h2><p>Try a different name, username, or network address.</p></section>
+    }
+    else
+    {
+        <div class="device-list" role="list">
+            @foreach (var item in FilteredDevices)
+            {
+                <article class="device-card" role="listitem">
+                    <div class="device-card-main">
+                        <span class="status-dot @StatusClass(item.Status)" aria-hidden="true">@StatusSymbol(item.Status)</span>
+                        <div>
+                            <h2><a href="@($"/devices/{item.Device.Id:D}")">@item.Device.Name</a></h2>
+                            @if (!string.IsNullOrWhiteSpace(item.Device.Description)) { <p>@item.Device.Description</p> }
+                        </div>
+                    </div>
+                    <dl class="device-card-facts">
+                        <div><dt>Network</dt><dd>@string.Join(", ", item.Device.AllowedNetworks)</dd></div>
+                        <div><dt>Security</dt><dd>@SecurityLabel(item.Device.AuthenticationMode)</dd></div>
+                        <div><dt>Activity</dt><dd>@ActivityText(item)</dd></div>
+                        <div><dt>Status</dt><dd class="@StatusClass(item.Status)">@StatusText(item.Status)</dd></div>
+                    </dl>
+                </article>
+            }
+        </div>
+    }
+}
+
+@code {
+    private DeviceOverviewSnapshot _snapshot = null!;
+    private string _search = string.Empty;
+
+    protected override void OnInitialized() => _snapshot = Overview.GetSnapshot();
+
+    private IReadOnlyList<DeviceOverviewItem> FilteredDevices
+    {
+        get
+        {
+            var value = _search.Trim();
+            return value.Length == 0
+                ? _snapshot.Devices
+                : _snapshot.Devices.Where(item =>
+                    item.Device.Name.Contains(value, StringComparison.OrdinalIgnoreCase) ||
+                    (item.Device.SmtpUsername?.Contains(value, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    item.Device.AllowedNetworks.Any(network => network.Contains(value, StringComparison.OrdinalIgnoreCase)))
+                    .ToArray();
+        }
+    }
+
+    private static string SecurityLabel(DeviceAuthenticationMode mode) =>
+        mode == DeviceAuthenticationMode.Authenticated ? "Authenticated" : "Legacy";
+    private static string ActivityText(DeviceOverviewItem item) => item.Activity.LastAcceptedUtc is null
+        ? "No messages yet"
+        : item.Activity.LastAcceptedUtc.Value.ToLocalTime().ToString("d MMM, h:mm tt");
+    private static string StatusClass(DeviceUiStatus status) => status switch
+    {
+        DeviceUiStatus.Ready => "ready",
+        DeviceUiStatus.NeedsAttention => "attention",
+        _ => "disabled",
+    };
+    private static string StatusSymbol(DeviceUiStatus status) => status switch
+    {
+        DeviceUiStatus.Ready => "✓",
+        DeviceUiStatus.NeedsAttention => "!",
+        _ => "‖",
+    };
+    private static string StatusText(DeviceUiStatus status) => status switch
+    {
+        DeviceUiStatus.Ready => "Ready",
+        DeviceUiStatus.NeedsAttention => "Needs attention",
+        _ => "Disabled",
+    };
+}

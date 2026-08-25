@@ -1,0 +1,685 @@
+@* SPDX-License-Identifier: MPL-2.0 *@
+
+@page "/setup/microsoft"
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@implements IAsyncDisposable
+@using RelayBridge.Core.Microsoft
+@using RelayBridge.Infrastructure.Microsoft
+@using RelayBridge.Infrastructure.Storage
+@inject MicrosoftSetupService Setup
+@inject MicrosoftSetupScriptGenerator Scripts
+@inject MicrosoftCertificateService Certificates
+@inject RelayDatabase Database
+@inject MicrosoftIdentityRuntimeState MicrosoftIdentity
+@inject ExchangeDeliveryRuntimeState ExchangeDelivery
+@inject NativeMicrosoftSetupRuntime NativeSetup
+@inject NativeMicrosoftSetupServer NativeSetupServer
+@inject TimeProvider Clock
+@inject IJSRuntime JavaScript
+
+<PageTitle>Microsoft 365 setup · RelayBridge</PageTitle>
+
+<div class="wizard-shell">
+    <aside class="wizard-progress" aria-label="Setup progress">
+        <p class="eyebrow">Microsoft 365</p>
+        <ol>
+            @foreach (var item in ProgressItems)
+            {
+                <li class="@ProgressClass(item.Step)" aria-current="@(item.Step == State.Step ? "step" : null)">
+                    <span aria-hidden="true">@ProgressSymbol(item.Step)</span>
+                    @item.Label
+                </li>
+            }
+        </ol>
+    </aside>
+
+    <section class="wizard-card" aria-live="polite">
+        @if (!string.IsNullOrWhiteSpace(_notice))
+        {
+            <div class="notice @(_noticeIsError ? "error" : "success")" role="@(_noticeIsError ? "alert" : "status")">
+                @_notice
+                @if (!string.IsNullOrWhiteSpace(_technicalCode) || !string.IsNullOrWhiteSpace(_correlationId) ||
+                    _safeFailureDetails is not null)
+                {
+                    <details>
+                        <summary>Technical details</summary>
+                        <dl class="technical-result">
+                            @if (!string.IsNullOrWhiteSpace(_technicalCode))
+                            {
+                                <div><dt>Category / response</dt><dd><code>@_technicalCode</code></dd></div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(_correlationId))
+                            {
+                                <div><dt>Correlation ID</dt><dd><code>@_correlationId</code></dd></div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(_safeFailureDetails?.PowerShellExceptionType))
+                            {
+                                <div><dt>Microsoft error type</dt><dd><code>@_safeFailureDetails.PowerShellExceptionType</code></dd></div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(_safeFailureDetails?.FullyQualifiedErrorId))
+                            {
+                                <div><dt>PowerShell error ID</dt><dd><code>@_safeFailureDetails.FullyQualifiedErrorId</code></dd></div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(_safeFailureDetails?.PowerShellCategory))
+                            {
+                                <div><dt>PowerShell category</dt><dd><code>@_safeFailureDetails.PowerShellCategory</code></dd></div>
+                            }
+                            @if (_safeFailureDetails?.HttpStatusCode is not null)
+                            {
+                                <div><dt>HTTP status</dt><dd><code>@_safeFailureDetails.HttpStatusCode</code></dd></div>
+                            }
+                            <div><dt>Timestamp</dt><dd>@_technicalTimestamp?.ToString("u")</dd></div>
+                        </dl>
+                    </details>
+                }
+            </div>
+        }
+
+        @switch (State.Step)
+        {
+            case MicrosoftSetupStep.Welcome:
+                <p class="eyebrow">Welcome</p>
+                <h1>Connect Microsoft 365</h1>
+                <p class="lead">RelayBridge will securely send printer email through your Microsoft 365 tenant. Email and credentials remain on this server.</p>
+                <ul class="check-list">
+                    <li>Microsoft 365 administrator access</li>
+                    <li>Exchange Online</li>
+                    <li>@(NativeSetup.Snapshot.Available ? "A locally signed-in Microsoft 365 administrator" : "PowerShell 7 for the Advanced recovery path")</li>
+                </ul>
+                <fieldset>
+                    <legend>How would you like to connect?</legend>
+                    <label class="choice-card">
+                        <input type="radio" name="setup-mode" checked="@(SelectedMode == MicrosoftSetupMode.NewApplication)" @onchange="() => SelectedMode = MicrosoftSetupMode.NewApplication" />
+                        <span><strong>Set up a new RelayBridge application</strong><small>Recommended for most installations</small></span>
+                    </label>
+                    <label class="choice-card">
+                        <input type="radio" name="setup-mode" checked="@(SelectedMode == MicrosoftSetupMode.ExistingApplication)" @onchange="() => SelectedMode = MicrosoftSetupMode.ExistingApplication" />
+                        <span><strong>Use an existing Microsoft application</strong><small>Advanced</small></span>
+                    </label>
+                </fieldset>
+                <div class="actions">
+                    <button class="button primary" @onclick="BeginAsync">Get started</button>
+                    @if (_hasActiveConfiguration)
+                    {
+                        <button class="button secondary" @onclick="RepairAsync">Repair connection</button>
+                    }
+                </div>
+                <details class="technical-details">
+                    <summary>How does this work?</summary>
+                    <p>RelayBridge uses a customer-owned application, a local certificate, and an Exchange permission restricted to the selected sender. It never asks for a Microsoft administrator password.</p>
+                </details>
+                break;
+
+            case MicrosoftSetupStep.Certificate:
+                <p class="eyebrow">Step 1</p>
+                <h1>Authentication certificate</h1>
+                <p class="lead">RelayBridge uses a certificate instead of a password. The private key never leaves this server.</p>
+                <div class="option-grid">
+                    <article class="option-card">
+                        <h2>Create on this server</h2>
+                        <p>Best for evaluation and simpler deployments. The private key is non-exportable where Windows supports it.</p>
+                        <label for="certificate-store">Certificate store</label>
+                        <select id="certificate-store" @bind="GeneratedStore">
+                            <option value="@CertificateStoreTarget.LocalMachine">Service computer (recommended)</option>
+                            <option value="@CertificateStoreTarget.CurrentUser">Current user (development only)</option>
+                        </select>
+                        <button class="button primary" disabled="@_busy" @onclick="GenerateCertificateAsync">Create certificate</button>
+                    </article>
+                    <article class="option-card">
+                        <h2>Use an existing certificate</h2>
+                        <p>Choose this for an organization-managed certificate or certificate lifecycle policy.</p>
+                        <button class="button secondary" disabled="@_busy" @onclick="LoadCertificatesAsync">Find suitable certificates</button>
+                    </article>
+                </div>
+                @if (_availableCertificates.Count > 0)
+                {
+                    <div class="certificate-list" aria-label="Suitable certificates">
+                        @foreach (var certificate in _availableCertificates)
+                        {
+                            <article>
+                                <div>
+                                    <strong>@certificate.Subject</strong>
+                                    <span>@($"{certificate.StoreLocation}\\My") · valid · private key available · expires @certificate.NotAfter.ToString("d MMM yyyy")</span>
+                                    <code>@certificate.Thumbprint</code>
+                                </div>
+                                <button class="button secondary" @onclick="() => UseCertificateAsync(certificate)">Use this certificate</button>
+                            </article>
+                        }
+                    </div>
+                }
+                <p class="guidance">For environments with an internal PKI or certificate management policy, choose an existing managed certificate.</p>
+                break;
+
+            case MicrosoftSetupStep.MicrosoftApplication:
+                <p class="eyebrow">Step 2</p>
+                <h1>Configure Microsoft application</h1>
+                <p class="lead">RelayBridge uses Microsoft's sign-in experience. It never receives your administrator password or retains administrator access.</p>
+                @if (State.Certificate is not null)
+                {
+                    <div class="certificate-summary">
+                        <span>Authentication certificate</span>
+                        <strong>@State.Certificate.Thumbprint</strong>
+                        <a class="button secondary" href="@PublicCertificateUrl">Download public certificate</a>
+                    </div>
+                }
+                @if (State.Mode == MicrosoftSetupMode.ExistingApplication)
+                {
+                    <div class="form-grid">
+                        <label>Tenant ID<input @bind="_tenantId" autocomplete="off" /></label>
+                        <label>Application ID<input @bind="_clientId" autocomplete="off" /></label>
+                        <label>Service principal object ID<input @bind="_servicePrincipalId" autocomplete="off" /></label>
+                    </div>
+                    <button class="button secondary" @onclick="SaveExistingIdentifiersAsync">Validate identifiers</button>
+                }
+                @if (State.Mode == MicrosoftSetupMode.NewApplication && NativeSetup.Snapshot.Available)
+                {
+                    <div class="script-panel">
+                        <div>
+                            <h2>Administrator setup</h2>
+                            <p>Creates a dedicated application, registers only the public certificate, and grants scoped Exchange SMTP permission to one sender.</p>
+                        </div>
+                        <ul class="check-list">
+                            <li>No Microsoft password enters RelayBridge</li>
+                            <li>No administrator token is retained</li>
+                            <li>No Graph mail-delivery permission is added</li>
+                            <li>The private certificate key remains on this server</li>
+                        </ul>
+                        <label for="native-sender-mailbox">Authorized sender mailbox</label>
+                        <input id="native-sender-mailbox" type="email" maxlength="254" @bind="_senderMailbox" placeholder="scanner@example.com" autocomplete="off" />
+                        <div class="actions">
+                            <button class="button primary" disabled="@(_busy || NativeSetup.Snapshot.Running)" @onclick="StartNativeSetupAsync">Continue Microsoft setup</button>
+                            @if (NativeSetup.Snapshot.Running)
+                            {
+                                <button class="button secondary" @onclick="CancelNativeSetupAsync">Cancel</button>
+                            }
+                        </div>
+                        <p class="guidance" role="status">@NativeSetup.Snapshot.Message</p>
+                    </div>
+                }
+                else if (State.Mode == MicrosoftSetupMode.NewApplication)
+                {
+                    <div class="warning-panel" role="status">
+                        <strong>Native Microsoft setup tools are not installed</strong>
+                        <p>Repair the RelayBridge installation, or use Advanced manual setup below.</p>
+                    </div>
+                }
+                <details class="technical-details" open="@(State.Mode == MicrosoftSetupMode.ExistingApplication)">
+                    <summary>Advanced manual Microsoft setup</summary>
+                    <p>Use the generated PowerShell workflow for recovery, unusual tenant policies, or an existing application.</p>
+                <div class="script-panel">
+                    <div>
+                        <h2>Stage A — Microsoft Entra</h2>
+                        <p>Creates or verifies the single-tenant application, registers only the public certificate, and confirms API permission entries are zero.</p>
+                    </div>
+                    <div class="button-row">
+                        <button class="button secondary" @onclick="GenerateEntraScriptAsync">Prepare script</button>
+                        <button class="button secondary" disabled="@(string.IsNullOrEmpty(_entraScript))" @onclick="() => CopyAsync(_entraScript)">Copy</button>
+                        <button class="button secondary" disabled="@(string.IsNullOrEmpty(_entraScript))" @onclick="DownloadEntraAsync">Download .ps1</button>
+                    </div>
+                    @if (!string.IsNullOrEmpty(_entraScript))
+                    {
+                        <details>
+                            <summary>View script</summary>
+                            <textarea class="script-text" readonly aria-label="Microsoft Entra setup script">@_entraScript</textarea>
+                        </details>
+                    }
+                </div>
+                <label for="entra-result">Paste the JSON result printed by the script</label>
+                <textarea id="entra-result" maxlength="4096" @bind="_entraResult" placeholder='{"TenantId":"...","ClientId":"..."}'></textarea>
+                <div class="actions">
+                    <button class="button primary" @onclick="ApplyEntraResultAsync">Continue</button>
+                    <button class="button secondary" @onclick="BackAsync">Back</button>
+                </div>
+                </details>
+                break;
+
+            case MicrosoftSetupStep.ExchangePermission:
+                <p class="eyebrow">Step 3</p>
+                <h1>Choose sender mailbox</h1>
+                <p class="lead">RelayBridge will be restricted to this Exchange Online mailbox.</p>
+                <label for="sender-mailbox">Authorized sender mailbox</label>
+                <input id="sender-mailbox" type="email" maxlength="254" @bind="_senderMailbox" placeholder="scanner@example.com" autocomplete="off" />
+                <button class="button secondary" @onclick="SaveSenderAsync">Use this sender</button>
+                @if (State.Mode == MicrosoftSetupMode.NewApplication && NativeSetup.Snapshot.Available)
+                {
+                    <div class="script-panel">
+                        <h2>Resume administrator setup</h2>
+                        <p>RelayBridge safely saved the completed application stage. A fresh administrator sign-in can resume the idempotent Exchange stage.</p>
+                        <button class="button primary" disabled="@(_busy || NativeSetup.Snapshot.Running)" @onclick="StartNativeSetupAsync">Resume native setup</button>
+                        <p class="guidance" role="status">@NativeSetup.Snapshot.Message</p>
+                    </div>
+                }
+                <details class="technical-details" open="@(State.Mode == MicrosoftSetupMode.ExistingApplication)">
+                    <summary>Advanced manual Exchange setup</summary>
+                <div class="process-separator">
+                    <strong>Open a new PowerShell 7 window</strong>
+                    <span>Close the Microsoft Entra PowerShell process before running the Exchange stage.</span>
+                </div>
+                <div class="script-panel">
+                    <div>
+                        <h2>Stage B — Exchange Online</h2>
+                        <p>Creates or reuses one dedicated sender group, an explicit mailbox scope, and the scoped Application SMTP.SendAsApp role.</p>
+                    </div>
+                    <div class="button-row">
+                        <button class="button secondary" @onclick="GenerateExchangeScriptAsync">Prepare script</button>
+                        <button class="button secondary" disabled="@(string.IsNullOrEmpty(_exchangeScript))" @onclick="() => CopyAsync(_exchangeScript)">Copy</button>
+                        <button class="button secondary" disabled="@(string.IsNullOrEmpty(_exchangeScript))" @onclick="DownloadExchangeAsync">Download .ps1</button>
+                    </div>
+                    @if (!string.IsNullOrEmpty(_exchangeScript))
+                    {
+                        <details>
+                            <summary>View script</summary>
+                            <textarea class="script-text" readonly aria-label="Exchange Online setup script">@_exchangeScript</textarea>
+                        </details>
+                    }
+                </div>
+                <label for="exchange-result">Paste the JSON result printed by the script</label>
+                <textarea id="exchange-result" maxlength="4096" @bind="_exchangeResult"></textarea>
+                <div class="actions">
+                    <button class="button primary" @onclick="ApplyExchangeResultAsync">Continue</button>
+                    <button class="button secondary" @onclick="BackAsync">Back</button>
+                </div>
+                </details>
+                break;
+
+            case MicrosoftSetupStep.VerifyIdentity:
+                <p class="eyebrow">Step 4</p>
+                <h1>Verify Microsoft identity</h1>
+                <p class="lead">RelayBridge will check the local certificate and request an Exchange Online application token using the existing secure identity service.</p>
+                @StatusRows(("Certificate", State.Certificate is not null), ("Tenant", State.TenantId is not null), ("Application", State.ClientId is not null), ("Exchange permission evidence", State.ExchangeResultValidated))
+                <div class="actions">
+                    <button class="button primary" disabled="@_busy" @onclick="VerifyIdentityAsync">Verify identity</button>
+                    <button class="button secondary" @onclick="BackAsync">Back</button>
+                </div>
+                break;
+
+            case MicrosoftSetupStep.VerifyExchange:
+                <p class="eyebrow">Step 5</p>
+                <h1>Test Exchange Online</h1>
+                <p class="lead">RelayBridge will use the proven production SMTP OAuth provider and send a small verification message to the selected sender mailbox.</p>
+                @StatusRows(("Microsoft identity", State.IdentityValidated), ("Exchange SMTP", false), ("Sender authorization", false))
+                <div class="actions">
+                    <button class="button primary" disabled="@_busy" @onclick="VerifyExchangeAsync">Test secure connection</button>
+                    <button class="button secondary" @onclick="BackAsync">Back</button>
+                </div>
+                break;
+
+            case MicrosoftSetupStep.TestMessage:
+                <p class="eyebrow">Step 6</p>
+                <h1>Send test email</h1>
+                <p class="lead">The candidate configuration has passed certificate, token, TLS, OAuth SMTP, and sender authorization checks and is now active.</p>
+                @StatusRows(("Microsoft identity", true), ("Exchange connection", true), ("Sender authorized", true))
+                <label for="test-recipient">Send a test message to</label>
+                <input id="test-recipient" type="email" maxlength="254" @bind="_testRecipient" placeholder="administrator@example.com" autocomplete="off" />
+                <div class="actions">
+                    <button class="button primary" disabled="@_busy" @onclick="SendTestAsync">Send test</button>
+                    <button class="button secondary" @onclick="BackAsync">Back</button>
+                </div>
+                <p class="guidance">RelayBridge can prove final SMTP acceptance by Microsoft 365. It does not request inbox access, so please check the recipient inbox.</p>
+                break;
+
+            case MicrosoftSetupStep.Complete:
+                @if (RuntimeReadiness == MicrosoftRuntimeReadiness.Ready)
+                {
+                    <div class="complete-mark" aria-hidden="true">✓</div>
+                    <p class="eyebrow">Setup complete</p>
+                    <h1>Microsoft 365 is ready</h1>
+                    <ul class="check-list prominent">
+                        <li>Secure certificate authentication</li>
+                        <li>Exchange Online connected</li>
+                        <li>Sender authorized</li>
+                        <li>Test message accepted by Microsoft 365</li>
+                    </ul>
+                }
+                else
+                {
+                    <p class="eyebrow">Existing configuration</p>
+                    <h1>@(RuntimeReadiness == MicrosoftRuntimeReadiness.NeedsAttention ? "Microsoft 365 needs attention" : "Microsoft 365 verification required")</h1>
+                    <p class="lead">The saved setup completed previously, but RelayBridge has not reverified Exchange and sender authorization during this service start.</p>
+                    <button class="button primary" disabled="@_busy" @onclick="RepairAsync">Verify connection</button>
+                }
+                <div class="sender-result"><span>Sender</span><strong>@State.SenderMailbox</strong></div>
+                <details class="technical-details">
+                    <summary>Security details</summary>
+                    <dl class="security-summary">
+                        <div><dt>Authentication</dt><dd>Certificate</dd></div>
+                        <div><dt>Private key</dt><dd>Stored locally</dd></div>
+                        <div><dt>Microsoft access</dt><dd>Scoped sender mailbox</dd></div>
+                        <div><dt>API permissions</dt><dd>None</dd></div>
+                        <div><dt>Transport</dt><dd>TLS + OAuth</dd></div>
+                    </dl>
+                </details>
+                <a class="button primary" href="/">Finish</a>
+                break;
+        }
+
+        @if (State.Step is not MicrosoftSetupStep.Welcome and not MicrosoftSetupStep.Complete)
+        {
+            <div class="cancel-row">
+                <button class="link-button" @onclick="CancelAsync">Cancel setup</button>
+                <span>Existing active configuration and certificates are kept.</span>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private static readonly (MicrosoftSetupStep Step, string Label)[] ProgressItems =
+    [
+        (MicrosoftSetupStep.Welcome, "Welcome"),
+        (MicrosoftSetupStep.Certificate, "Certificate"),
+        (MicrosoftSetupStep.MicrosoftApplication, "Microsoft application"),
+        (MicrosoftSetupStep.ExchangePermission, "Exchange permission"),
+        (MicrosoftSetupStep.VerifyIdentity, "Verify identity"),
+        (MicrosoftSetupStep.VerifyExchange, "Verify Exchange"),
+        (MicrosoftSetupStep.TestMessage, "Test email"),
+        (MicrosoftSetupStep.Complete, "Complete"),
+    ];
+
+    private MicrosoftSetupState State = MicrosoftSetupState.Fresh(DateTimeOffset.UtcNow);
+    private MicrosoftSetupMode SelectedMode = MicrosoftSetupMode.NewApplication;
+    private CertificateStoreTarget GeneratedStore = CertificateStoreTarget.LocalMachine;
+    private readonly List<MicrosoftCertificateMetadata> _availableCertificates = [];
+    private string _tenantId = string.Empty;
+    private string _clientId = string.Empty;
+    private string _servicePrincipalId = string.Empty;
+    private string _senderMailbox = string.Empty;
+    private string _testRecipient = string.Empty;
+    private string _entraResult = string.Empty;
+    private string _exchangeResult = string.Empty;
+    private string _entraScript = string.Empty;
+    private string _exchangeScript = string.Empty;
+    private string? _notice;
+    private string? _technicalCode;
+    private string? _correlationId;
+    private DateTimeOffset? _technicalTimestamp;
+    private NativeSetupSafeFailureDetails? _safeFailureDetails;
+    private bool _noticeIsError;
+    private bool _busy;
+    private bool _hasActiveConfiguration;
+    private CancellationTokenSource? _nativeMonitorCancellation;
+    private string? _activeConfigurationFingerprint;
+    private MicrosoftRuntimeReadiness RuntimeReadiness => MicrosoftRuntimeReadinessPolicy.Evaluate(
+        _hasActiveConfiguration,
+        _activeConfigurationFingerprint,
+        MicrosoftIdentity,
+        ExchangeDelivery);
+
+    private string PublicCertificateUrl => State.Certificate is null
+        ? "#"
+        : $"/setup/public-certificate?thumbprint={Uri.EscapeDataString(State.Certificate.Thumbprint)}&store={State.Certificate.StoreLocation}";
+
+    protected override void OnInitialized()
+    {
+        State = Setup.GetState();
+        SelectedMode = State.Mode;
+        var activeConfiguration = Database.GetActiveMicrosoftConfiguration();
+        _hasActiveConfiguration = activeConfiguration?.AuthorizedSender is not null;
+        _activeConfigurationFingerprint = activeConfiguration?.Fingerprint;
+        SyncFields();
+    }
+
+    private Task BeginAsync() => RunAsync(() => Task.FromResult(Setup.Begin(SelectedMode)));
+
+    private Task RepairAsync() => RunAsync(() => Task.FromResult(Setup.BeginRepair()));
+
+    private Task GenerateCertificateAsync() => RunAsync(() => Task.FromResult(Setup.GenerateCertificate(GeneratedStore)));
+
+    private Task LoadCertificatesAsync() => RunAsync(() =>
+    {
+        _availableCertificates.Clear();
+        _availableCertificates.AddRange(Certificates.ListUsableCertificates(CertificateStoreTarget.LocalMachine));
+        _availableCertificates.AddRange(Certificates.ListUsableCertificates(CertificateStoreTarget.CurrentUser));
+        _notice = _availableCertificates.Count == 0
+            ? "No suitable RSA signing certificates with an accessible private key were found."
+            : $"Found {_availableCertificates.Count} suitable certificate(s).";
+        _noticeIsError = _availableCertificates.Count == 0;
+        return Task.FromResult(State);
+    });
+
+    private Task UseCertificateAsync(MicrosoftCertificateMetadata certificate) => RunAsync(() => Task.FromResult(
+        Setup.SelectCertificate(MicrosoftCertificateReference.Create(certificate.Thumbprint, certificate.StoreLocation))));
+
+    private Task SaveExistingIdentifiersAsync() => RunAsync(() => Task.FromResult(
+        Setup.SetExistingApplicationIdentifiers(_tenantId, _clientId, _servicePrincipalId)));
+
+    private async Task GenerateEntraScriptAsync()
+    {
+        await RunActionAsync(async () =>
+        {
+            var export = await Certificates.ExportPublicCertificateAsync(State.Certificate!);
+            _entraScript = Scripts.GenerateEntraScript(State, export.FullPath, Clock.GetUtcNow());
+            _notice = "Microsoft Entra setup script is ready. Run it in PowerShell 7, then paste its JSON result.";
+        });
+    }
+
+    private Task ApplyEntraResultAsync() => RunAsync(() => Task.FromResult(Setup.ApplyEntraResult(_entraResult)));
+
+    private Task SaveSenderAsync() => RunAsync(() => Task.FromResult(Setup.SetSenderMailbox(_senderMailbox)));
+
+    private async Task StartNativeSetupAsync()
+    {
+        if (_busy || NativeSetup.Snapshot.Running)
+        {
+            return;
+        }
+
+        var launched = false;
+        await RunActionAsync(async () =>
+        {
+            State = Setup.SetSenderMailbox(_senderMailbox);
+            NativeSetupServer.PrepareForLaunch();
+            await JavaScript.InvokeVoidAsync("relayBridge.launchMicrosoftSetup");
+            launched = true;
+            _notice = "RelayBridge Setup is opening. Confirm the requested sender and actions in the native window.";
+            _noticeIsError = false;
+        });
+
+        if (!launched)
+        {
+            return;
+        }
+
+        _nativeMonitorCancellation?.Cancel();
+        _nativeMonitorCancellation?.Dispose();
+        _nativeMonitorCancellation = new CancellationTokenSource(TimeSpan.FromMinutes(21));
+        _ = MonitorNativeSetupAsync(_nativeMonitorCancellation.Token);
+    }
+
+    private async Task MonitorNativeSetupAsync(CancellationToken cancellationToken)
+    {
+        var observedRunning = false;
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
+                var snapshot = NativeSetup.Snapshot;
+                observedRunning |= snapshot.Running;
+                if (observedRunning || snapshot.FailureCategory != NativeSetupFailureCategory.None ||
+                    snapshot.Stage == NativeSetupStage.Complete)
+                {
+                    await InvokeAsync(() =>
+                    {
+                        _notice = snapshot.Message;
+                        _noticeIsError = snapshot.Failed;
+                        _technicalCode = snapshot.SafeCode;
+                        _correlationId = snapshot.SafeCorrelationId;
+                        _safeFailureDetails = snapshot.SafeFailureDetails;
+                        _technicalTimestamp = snapshot.UpdatedUtc;
+                        State = Setup.GetState();
+                        SyncFields();
+                        StateHasChanged();
+                    });
+                }
+
+                if ((observedRunning && !snapshot.Running) || snapshot.Failed ||
+                    snapshot.FailureCategory == NativeSetupFailureCategory.Cancelled ||
+                    snapshot.Stage == NativeSetupStage.Complete)
+                {
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task CancelNativeSetupAsync()
+    {
+        await NativeSetup.CancelAsync();
+        _notice = "Cancelling Microsoft setup. The candidate remains inactive.";
+        _noticeIsError = false;
+    }
+
+    private async Task GenerateExchangeScriptAsync()
+    {
+        await RunActionAsync(() =>
+        {
+            State = Setup.SetSenderMailbox(_senderMailbox);
+            _exchangeScript = Scripts.GenerateExchangeScript(State, Clock.GetUtcNow());
+            _notice = "Exchange setup script is ready. Run it in a new PowerShell 7 process, then paste its JSON result.";
+            return Task.CompletedTask;
+        });
+    }
+
+    private Task ApplyExchangeResultAsync() => RunAsync(() => Task.FromResult(Setup.ApplyExchangeResult(_exchangeResult)));
+
+    private Task VerifyIdentityAsync() => RunOperationAsync(Setup.VerifyIdentityAsync);
+
+    private Task VerifyExchangeAsync() => RunOperationAsync(Setup.VerifyExchangeAsync);
+
+    private Task SendTestAsync() => RunOperationAsync(token => Setup.SendTestMessageAsync(_testRecipient, token));
+
+    private Task BackAsync() => RunAsync(() => Task.FromResult(Setup.Back()));
+
+    private async Task CancelAsync()
+    {
+        await NativeSetup.CancelAsync();
+        await RunAsync(() => Task.FromResult(Setup.Cancel()));
+    }
+
+    private async Task CopyAsync(string text)
+    {
+        await JavaScript.InvokeVoidAsync("relayBridge.copyText", text);
+        _notice = "Copied to the clipboard.";
+        _noticeIsError = false;
+    }
+
+    private ValueTask DownloadAsync(string fileName, string text) =>
+        JavaScript.InvokeVoidAsync("relayBridge.downloadText", fileName, text);
+
+    private async Task DownloadEntraAsync() =>
+        await DownloadAsync("RelayBridge-Entra-Setup.ps1", _entraScript);
+
+    private async Task DownloadExchangeAsync() =>
+        await DownloadAsync("RelayBridge-Exchange-Setup.ps1", _exchangeScript);
+
+    private async Task RunOperationAsync(Func<CancellationToken, Task<MicrosoftSetupOperationResult>> operation)
+    {
+        await RunActionAsync(async () =>
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(12));
+            var result = await operation(timeout.Token);
+            State = result.State;
+            var activeConfiguration = Database.GetActiveMicrosoftConfiguration();
+            _hasActiveConfiguration = activeConfiguration?.AuthorizedSender is not null;
+            _activeConfigurationFingerprint = activeConfiguration?.Fingerprint;
+            _notice = result.Message;
+            _noticeIsError = !result.Succeeded;
+            _technicalCode = result.TechnicalCode;
+            _correlationId = result.CorrelationId;
+            _technicalTimestamp = Clock.GetUtcNow();
+            SyncFields();
+        });
+    }
+
+    private async Task RunAsync(Func<Task<MicrosoftSetupState>> action)
+    {
+        await RunActionAsync(async () =>
+        {
+            State = await action();
+            _notice ??= "Setup progress saved.";
+            SyncFields();
+        });
+    }
+
+    private async Task RunActionAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _notice = null;
+        _technicalCode = null;
+        _correlationId = null;
+        _safeFailureDetails = null;
+        _technicalTimestamp = null;
+        _noticeIsError = false;
+        try
+        {
+            await action();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or MicrosoftIdentityException)
+        {
+            _notice = exception.Message;
+            _noticeIsError = true;
+        }
+        catch (Exception exception) when (exception is IOException or
+            UnauthorizedAccessException or
+            System.Security.Cryptography.CryptographicException)
+        {
+            _notice = "Windows could not complete the certificate operation. Check the selected certificate store and the RelayBridge process permissions.";
+            _technicalCode = exception.GetType().Name;
+            _technicalTimestamp = Clock.GetUtcNow();
+            _noticeIsError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void SyncFields()
+    {
+        _tenantId = State.TenantId?.ToString("D") ?? _tenantId;
+        _clientId = State.ClientId?.ToString("D") ?? _clientId;
+        _servicePrincipalId = State.ServicePrincipalObjectId?.ToString("D") ?? _servicePrincipalId;
+        _senderMailbox = State.SenderMailbox ?? _senderMailbox;
+    }
+
+    private string ProgressClass(MicrosoftSetupStep step) => step == State.Step
+        ? "current"
+        : step < State.Step ? "complete" : string.Empty;
+
+    private string ProgressSymbol(MicrosoftSetupStep step) => step < State.Step ? "✓" : ((int)step + 1).ToString();
+
+    private RenderFragment StatusRows(params (string Label, bool Ready)[] rows) => builder =>
+    {
+        builder.OpenElement(0, "dl");
+        builder.AddAttribute(1, "class", "verification-list");
+        var sequence = 2;
+        foreach (var row in rows)
+        {
+            builder.OpenElement(sequence++, "div");
+            builder.OpenElement(sequence++, "dt");
+            builder.AddContent(sequence++, row.Label);
+            builder.CloseElement();
+            builder.OpenElement(sequence++, "dd");
+            builder.AddContent(sequence++, row.Ready ? "Ready" : "Waiting");
+            builder.CloseElement();
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+    };
+
+    public ValueTask DisposeAsync()
+    {
+        _nativeMonitorCancellation?.Cancel();
+        _nativeMonitorCancellation?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}
