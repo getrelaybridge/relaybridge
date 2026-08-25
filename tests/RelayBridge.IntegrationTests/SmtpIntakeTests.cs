@@ -2,6 +2,7 @@
 
 using System.Diagnostics;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using RelayBridge.Infrastructure.Storage;
 using Xunit;
@@ -542,9 +543,18 @@ public sealed class SmtpIntakeTests
                 Assert.StartsWith("250", await client.CommandAsync("NOOP"), StringComparison.Ordinal);
             }
 
-            await client.SendLineAsync("NOOP");
-            await Assert.ThrowsAsync<IOException>(() => client.ReadResponseAsync());
+            using var rejectionDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            Assert.StartsWith(
+                "421 4.7.0 Too many commands",
+                await client.ReadResponseAsync(rejectionDeadline.Token),
+                StringComparison.Ordinal);
+            await AssertConnectionTerminatesAsync(client, TimeSpan.FromSeconds(5));
         }
+
+        Assert.Empty(host.Preview.GetMessages());
+        Assert.Empty(host.Database.GetQueuedMessages());
+        Assert.Empty(Directory.EnumerateFiles(host.Database.IncomingDirectory));
+        Assert.Empty(Directory.EnumerateFiles(host.Database.PendingDirectory));
 
         await using var nextClient = await host.ConnectAsync();
         Assert.StartsWith("220", await nextClient.ReadResponseAsync(), StringComparison.Ordinal);
@@ -741,6 +751,22 @@ public sealed class SmtpIntakeTests
         Assert.Contains("AUTH PLAIN LOGIN", response, StringComparison.Ordinal);
         Assert.DoesNotContain("STARTTLS", response, StringComparison.Ordinal);
         return client;
+    }
+
+    private static async Task AssertConnectionTerminatesAsync(SmtpTestClient client, TimeSpan timeout)
+    {
+        using var deadline = new CancellationTokenSource(timeout);
+        try
+        {
+            var response = await client.ReadResponseAsync(deadline.Token);
+            Assert.Fail($"SMTP session remained usable after the command limit and returned: {response}");
+        }
+        catch (IOException)
+        {
+        }
+        catch (SocketException)
+        {
+        }
     }
 
     private static async Task StartDataAsync(SmtpTestClient client)

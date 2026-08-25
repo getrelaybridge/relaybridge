@@ -42,7 +42,8 @@ individual, non-revenue-generating use and requires re-evaluation if use becomes
   internal test-only facility
 - failed SQLite connection initialization disposes the connection before propagating the error;
   corrupt and newer-schema fixtures fail closed without rewriting the database
-- focused hostile-input regressions cover bounded command flooding, partial-line idle timeout,
+- focused hostile-input regressions cover command flooding through its protocol-level `421` rejection
+  and bounded connection close, partial-line idle timeout,
   malformed MIME/many headers/binary-like payload preservation, database corruption, and future
   schema refusal
 - the installer pipeline emits a machine-readable CycloneDX 1.6 SBOM and third-party inventory;
@@ -316,6 +317,8 @@ individual, non-revenue-generating use and requires re-evaluation if use becomes
 
 - Release build: 0 warnings, 0 errors
 - Unit tests: 59/59; integration tests: 424/424; total: 483/483; failed: 0; skipped: 0
+- command-flood CI stabilization: focused test 25/25; CI-equivalent Release test configuration
+  483/483; license and whitespace gates PASS
 - M9 focused hardening: 12/12; hostile management: 12/12; hostile SMTP AUTH: 11/11;
   graceful shutdown: 2/2; M9.1 regression smoke: 16/16
 - Installer 0.9.2 build/validation, CycloneDX SBOM, notices sidecar, payload scan, PowerShell

@@ -16,7 +16,7 @@ MSI or bootstrapper: the installer acquires exact pinned packages directly from 
 after the explicit Graph terms boundary, verifies them twice, and commits them into protected
 Program Files. Normal runtime never contacts the Gallery or falls back to user/system modules.
 
-Development installers are not public-release artifacts. External publication remains prohibited
+Development installers are not public-release artifacts. External/public Windows binary publication remains prohibited
 while Microsoft redistribution/missing-license clarification and the trusted Authenticode signing
 identity remain open. WiX Toolset 6 compliance is closed for the current individual,
 non-revenue-generating use and must be reassessed if that status changes. See
@@ -27,8 +27,8 @@ public production release. It was created and is maintained by
 [@yuvaraj-builds-ai](https://github.com/yuvaraj-builds-ai), with
 contributions reviewed through the maintainer-led process in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Public source may precede the first official Windows binary release. The future public repository
-will begin from a clean tracked-source snapshot with fresh Git history; the private engineering
+Public source may precede the first official Windows binary release. The public repository began
+from a clean tracked-source snapshot with fresh Git history; the private engineering
 history and milestone tags are not publication inputs. The planned SignPath Foundation integration
 and current pre-application rules are documented in the
 [code signing policy](docs/release/CODE-SIGNING-POLICY.md).
