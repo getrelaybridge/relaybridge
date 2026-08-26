@@ -21,6 +21,17 @@ and requires re-evaluation if use becomes revenue-generating.
 
 ## Implemented
 
+- owner personal-test corrections keep the packaged SMTP listener and queue inert by default, while
+  generated printer-connectivity configuration now enables both the selected listener and queue;
+  the page provides download/copy actions, the exact environment override destination, safely
+  quoted elevated copy/restart commands, and manual address/port/program-scoped firewall guidance
+- post-restart `Verify connection` now validates the active certificate/private key, acquires the
+  normal Exchange application token, and uses the production DNS/TCP/STARTTLS/XOAUTH2 path through
+  successful authentication and QUIT without MAIL, RCPT, DATA, tenant mutation, or activation;
+  `Repair connection` remains a separate administrator-selected provisioning workflow
+- same-active-configuration repair preserves the already validated service-principal object ID;
+  starting a replacement candidate does not inherit that prior identity
+
 - RP-1 public release preparation defines a fresh-history Git-tracked source export, rejects
   generated/binary/private workspace material, and adds a source-snapshot verifier suitable for
   scanning the actual publication candidate
@@ -317,7 +328,11 @@ and requires re-evaluation if use becomes revenue-generating.
 ## Verified
 
 - Release build: 0 warnings, 0 errors
-- Unit tests: 59/59; integration tests: 424/424; total: 483/483; failed: 0; skipped: 0
+- Unit tests: 59/59; integration tests: 431/431; total: 490/490; failed: 0; skipped: 0
+- owner personal-test defect regressions cover queue-enabled bounded deployment JSON, actionable
+  administrator-assisted printer setup, direct active-configuration SMTP AUTH verification with no
+  mail transaction, sanitized failure/readiness evidence, UI verify/repair separation, and
+  same-configuration versus replacement service-principal preservation
 - command-flood CI stabilization: focused test 25/25; CI-equivalent Release test configuration
   483/483; license and whitespace gates PASS
 - M9 focused hardening: 12/12; hostile management: 12/12; hostile SMTP AUTH: 11/11;

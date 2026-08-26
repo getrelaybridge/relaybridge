@@ -415,6 +415,42 @@ public sealed class ExchangeDeliveryRuntimeState
         }
     }
 
+    internal void RecordAuthenticationVerificationSuccess(
+        MicrosoftAttemptContext attempt,
+        DateTimeOffset completedAt)
+    {
+        lock (_lock)
+        {
+            if (!_attempts.Remove(attempt.AttemptId, out var attemptSnapshot))
+            {
+                return;
+            }
+
+            var completed = attemptSnapshot with
+            {
+                Status = ExchangeDeliveryStatus.Healthy,
+                LastSuccessfulAt = completedAt,
+                LastCompletedAt = completedAt,
+                LastStage = "XOAUTH2",
+                LastErrorCategory = null,
+                XOAuth2Authenticated = true,
+                SenderAuthorized = true,
+                MessageAccepted = false,
+                CompletionSequence = _sequence.Next(),
+            };
+            if (attempt.ConfigurationFingerprint is not null)
+            {
+                _completedByFingerprint[attempt.ConfigurationFingerprint] = completed;
+            }
+
+            _snapshot = completed;
+            if (_visibleAttemptId == attempt.AttemptId)
+            {
+                _visibleAttemptId = null;
+            }
+        }
+    }
+
     internal void Abandon(MicrosoftAttemptContext attempt)
     {
         lock (_lock)

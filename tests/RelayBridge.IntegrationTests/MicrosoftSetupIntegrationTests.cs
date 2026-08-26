@@ -150,6 +150,123 @@ public sealed class MicrosoftSetupIntegrationTests
     }
 
     [Fact]
+    public async Task Direct_connection_verification_uses_active_configuration_without_repair_or_mail_submission()
+    {
+        await using var context = await SetupTestContext.CreateAsync();
+        var configuration = MicrosoftIdentityConfiguration.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            context.Certificate);
+        var completed = CompletedState(context, configuration, Guid.NewGuid());
+        context.Database.ActivateMicrosoftConfiguration(
+            configuration,
+            completed.SenderMailbox!,
+            completed);
+        var before = context.Database.GetActiveMicrosoftConfiguration()!;
+
+        var result = await context.Setup.VerifyActiveConnectionAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(MicrosoftSetupStep.Complete, result.State.Step);
+        Assert.Equal(MicrosoftSetupCandidateLifecycle.Activated, result.State.Lifecycle);
+        Assert.Equal(completed.ServicePrincipalObjectId, result.State.ServicePrincipalObjectId);
+        Assert.Contains("No email was sent", result.Message, StringComparison.Ordinal);
+        Assert.Equal(configuration.TenantId, context.IdentityFactory.LastConfiguration?.TenantId);
+        Assert.Equal(configuration.ClientId, context.IdentityFactory.LastConfiguration?.ClientId);
+        Assert.Equal(
+            configuration.Certificate.Thumbprint,
+            context.IdentityFactory.LastConfiguration?.Certificate.Thumbprint);
+        Assert.Equal(
+            configuration.Certificate.StoreLocation,
+            context.IdentityFactory.LastConfiguration?.Certificate.StoreLocation);
+        Assert.DoesNotContain(context.Server.Commands, command => command.StartsWith("MAIL FROM", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(context.Server.Commands, command => command.StartsWith("RCPT TO", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(context.Server.Commands, command => string.Equals(command, "DATA", StringComparison.OrdinalIgnoreCase));
+        Assert.True(context.Server.QuitReceived);
+        var after = context.Database.GetActiveMicrosoftConfiguration()!;
+        Assert.Equal(before.ActivationId, after.ActivationId);
+        Assert.Equal(before.Fingerprint, after.Fingerprint);
+        Assert.Equal(
+            MicrosoftRuntimeReadiness.Ready,
+            MicrosoftRuntimeReadinessPolicy.Evaluate(
+                configured: true,
+                after.Fingerprint,
+                context.IdentityRuntime,
+                context.ExchangeRuntime));
+        var exchange = context.ExchangeRuntime.GetCompletedSnapshot(after.Fingerprint);
+        Assert.True(exchange.XOAuth2Authenticated);
+        Assert.True(exchange.SenderAuthorized);
+        Assert.False(exchange.MessageAccepted);
+    }
+
+    [Fact]
+    public async Task Direct_connection_verification_failure_is_sanitized_and_preserves_active_configuration()
+    {
+        await using var context = await SetupTestContext.CreateAsync(new FakeExchangeScenario
+        {
+            AuthResult = "535 5.7.3 Authentication unsuccessful bearer should-not-appear",
+        });
+        var configuration = MicrosoftIdentityConfiguration.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            context.Certificate);
+        var completed = CompletedState(context, configuration, Guid.NewGuid());
+        context.Database.ActivateMicrosoftConfiguration(
+            configuration,
+            completed.SenderMailbox!,
+            completed);
+        var before = context.Database.GetActiveMicrosoftConfiguration()!;
+
+        var result = await context.Setup.VerifyActiveConnectionAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(MicrosoftSetupStep.Complete, result.State.Step);
+        Assert.Contains("XOAUTH2 authentication", result.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("should-not-appear", result.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("bearer", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(context.Server.Commands, command => command.StartsWith("MAIL FROM", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(context.Server.Commands, command => command.StartsWith("RCPT TO", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(context.Server.Commands, command => string.Equals(command, "DATA", StringComparison.OrdinalIgnoreCase));
+        var after = context.Database.GetActiveMicrosoftConfiguration()!;
+        Assert.Equal(before.ActivationId, after.ActivationId);
+        Assert.Equal(before.Fingerprint, after.Fingerprint);
+        Assert.Equal(
+            MicrosoftRuntimeReadiness.NeedsAttention,
+            MicrosoftRuntimeReadinessPolicy.Evaluate(
+                configured: true,
+                after.Fingerprint,
+                context.IdentityRuntime,
+                context.ExchangeRuntime));
+    }
+
+    [Fact]
+    public async Task Repair_preserves_service_principal_only_for_the_same_active_configuration()
+    {
+        await using var context = await SetupTestContext.CreateAsync();
+        var configuration = MicrosoftIdentityConfiguration.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            context.Certificate);
+        var servicePrincipal = Guid.NewGuid();
+        var completed = CompletedState(context, configuration, servicePrincipal);
+        context.Database.ActivateMicrosoftConfiguration(
+            configuration,
+            completed.SenderMailbox!,
+            completed);
+
+        var repair = context.Setup.BeginRepair();
+
+        Assert.Equal(MicrosoftSetupMode.ExistingApplication, repair.Mode);
+        Assert.Equal(MicrosoftSetupStep.MicrosoftApplication, repair.Step);
+        Assert.Equal(servicePrincipal, repair.ServicePrincipalObjectId);
+        Assert.Equal(completed.ActivationId, repair.ActivationId);
+
+        var replacement = context.Setup.Begin(MicrosoftSetupMode.NewApplication);
+        Assert.Null(replacement.ServicePrincipalObjectId);
+        Assert.NotEqual(completed.ActivationId, replacement.ActivationId);
+    }
+
+    [Fact]
     public async Task Pasted_results_are_bounded_strict_data_and_require_zero_permissions_and_exact_role()
     {
         await using var context = await SetupTestContext.CreateAsync();
@@ -635,6 +752,30 @@ public sealed class MicrosoftSetupIntegrationTests
             Guid.Parse("40000000-0000-0000-0000-000000000004"));
     }
 
+    private static MicrosoftSetupState CompletedState(
+        SetupTestContext context,
+        MicrosoftIdentityConfiguration configuration,
+        Guid servicePrincipalObjectId)
+    {
+        return new MicrosoftSetupState(
+            MicrosoftSetupStep.Complete,
+            MicrosoftSetupMode.NewApplication,
+            context.Certificate,
+            configuration.TenantId,
+            configuration.ClientId,
+            servicePrincipalObjectId,
+            "scanner@example.com",
+            EntraResultValidated: true,
+            ExchangeResultValidated: true,
+            IdentityValidated: true,
+            ExchangeValidated: true,
+            TestMessageAccepted: true,
+            DateTimeOffset.UtcNow,
+            Guid.NewGuid(),
+            Revision: 1,
+            Lifecycle: MicrosoftSetupCandidateLifecycle.Activated);
+    }
+
     private static JsonDocument DecodeScriptPayload(string script)
     {
         const string marker = "FromBase64String('";
@@ -694,6 +835,7 @@ public sealed class MicrosoftSetupIntegrationTests
             FakeIdentityFactory identityFactory,
             MicrosoftTokenProvider tokens,
             FakeExchangeSmtpServer server,
+            MicrosoftIdentityRuntimeState identityRuntime,
             ExchangeDeliveryRuntimeState exchangeRuntime,
             ExchangeDeliveryTester exchangeTester,
             MicrosoftSetupService setup)
@@ -705,6 +847,7 @@ public sealed class MicrosoftSetupIntegrationTests
             IdentityFactory = identityFactory;
             _tokens = tokens;
             Server = server;
+            IdentityRuntime = identityRuntime;
             ExchangeRuntime = exchangeRuntime;
             ExchangeTester = exchangeTester;
             Setup = setup;
@@ -715,6 +858,7 @@ public sealed class MicrosoftSetupIntegrationTests
         public MicrosoftCertificateReference Certificate { get; }
         public FakeIdentityFactory IdentityFactory { get; }
         public FakeExchangeSmtpServer Server { get; }
+        public MicrosoftIdentityRuntimeState IdentityRuntime { get; }
         public ExchangeDeliveryRuntimeState ExchangeRuntime { get; }
         public ExchangeDeliveryTester ExchangeTester { get; }
         public MicrosoftSetupService Setup { get; }
@@ -738,7 +882,16 @@ public sealed class MicrosoftSetupIntegrationTests
             var tokens = new MicrosoftTokenProvider(database, certificates, identityFactory);
             var server = new FakeExchangeSmtpServer(scenario ?? new FakeExchangeScenario());
             server.Start();
-            var runtime = new ExchangeDeliveryRuntimeState();
+            var sequence = new MicrosoftRuntimeEvidenceSequence();
+            var identityRuntime = new MicrosoftIdentityRuntimeState(database, sequence);
+            var identityTester = new MicrosoftAuthenticationTester(
+                database,
+                certificates,
+                tokens,
+                identityRuntime,
+                TimeProvider.System,
+                new TestLogger<MicrosoftAuthenticationTester>());
+            var runtime = new ExchangeDeliveryRuntimeState(sequence);
             var options = new ExchangeSmtpOptions
             {
                 ConnectTimeout = TimeSpan.FromSeconds(5),
@@ -762,6 +915,7 @@ public sealed class MicrosoftSetupIntegrationTests
                 database,
                 certificates,
                 tokens,
+                identityTester,
                 tester,
                 TimeProvider.System,
                 persistenceHooks);
@@ -773,6 +927,7 @@ public sealed class MicrosoftSetupIntegrationTests
                 identityFactory,
                 tokens,
                 server,
+                identityRuntime,
                 runtime,
                 tester,
                 setup));
@@ -782,6 +937,13 @@ public sealed class MicrosoftSetupIntegrationTests
             Database,
             Certificates,
             _tokens,
+            new MicrosoftAuthenticationTester(
+                Database,
+                Certificates,
+                _tokens,
+                IdentityRuntime,
+                TimeProvider.System,
+                new TestLogger<MicrosoftAuthenticationTester>()),
             ExchangeTester,
             TimeProvider.System,
             persistenceHooks);
@@ -831,11 +993,13 @@ public sealed class MicrosoftSetupIntegrationTests
     private sealed class FakeIdentityFactory : IMicrosoftIdentityClientFactory
     {
         public MicrosoftIdentityException? Error { get; set; }
+        public MicrosoftIdentityConfiguration? LastConfiguration { get; private set; }
 
         public IMicrosoftIdentityClient Create(
             MicrosoftIdentityConfiguration configuration,
             X509Certificate2 certificate)
         {
+            LastConfiguration = configuration;
             return new FakeIdentityClient(this, configuration.TenantId);
         }
 

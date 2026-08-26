@@ -44,6 +44,7 @@ public sealed class MicrosoftSetupService
     private readonly RelayDatabase _database;
     private readonly MicrosoftCertificateService _certificates;
     private readonly MicrosoftTokenProvider _tokens;
+    private readonly MicrosoftAuthenticationTester _identityTester;
     private readonly ExchangeDeliveryTester _exchangeTester;
     private readonly TimeProvider _timeProvider;
     private readonly MicrosoftSetupPersistenceHooks? _persistenceHooks;
@@ -52,9 +53,10 @@ public sealed class MicrosoftSetupService
         RelayDatabase database,
         MicrosoftCertificateService certificates,
         MicrosoftTokenProvider tokens,
+        MicrosoftAuthenticationTester identityTester,
         ExchangeDeliveryTester exchangeTester,
         TimeProvider timeProvider)
-        : this(database, certificates, tokens, exchangeTester, timeProvider, persistenceHooks: null)
+        : this(database, certificates, tokens, identityTester, exchangeTester, timeProvider, persistenceHooks: null)
     {
     }
 
@@ -62,6 +64,7 @@ public sealed class MicrosoftSetupService
         RelayDatabase database,
         MicrosoftCertificateService certificates,
         MicrosoftTokenProvider tokens,
+        MicrosoftAuthenticationTester identityTester,
         ExchangeDeliveryTester exchangeTester,
         TimeProvider timeProvider,
         MicrosoftSetupPersistenceHooks? persistenceHooks)
@@ -69,6 +72,7 @@ public sealed class MicrosoftSetupService
         _database = database;
         _certificates = certificates;
         _tokens = tokens;
+        _identityTester = identityTester;
         _exchangeTester = exchangeTester;
         _timeProvider = timeProvider;
         _persistenceHooks = persistenceHooks;
@@ -257,6 +261,8 @@ public sealed class MicrosoftSetupService
             return Begin(MicrosoftSetupMode.NewApplication, cancellationToken);
         }
 
+        var activeConfiguration = _database.GetActiveMicrosoftConfiguration(cancellationToken);
+        var completedState = _database.GetMicrosoftSetupState(cancellationToken);
         var certificate = _certificates.Validate(active.Certificate, cancellationToken);
         var state = MicrosoftSetupState.Fresh(_timeProvider.GetUtcNow()) with
         {
@@ -267,11 +273,72 @@ public sealed class MicrosoftSetupService
             Certificate = active.Certificate,
             TenantId = active.TenantId,
             ClientId = active.ClientId,
+            ServicePrincipalObjectId = IsSameActiveConfiguration(completedState, activeConfiguration)
+                ? completedState!.ServicePrincipalObjectId
+                : null,
             SenderMailbox = _database.GetMicrosoftAuthorizedSender(cancellationToken),
-            ActivationId = _database.GetActiveMicrosoftConfiguration(cancellationToken)?.ActivationId,
+            ActivationId = activeConfiguration?.ActivationId,
         };
         _database.SaveMicrosoftSetupState(state, cancellationToken);
         return state;
+    }
+
+    public async Task<MicrosoftSetupOperationResult> VerifyActiveConnectionAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var state = GetState(cancellationToken);
+        var active = _database.GetActiveMicrosoftConfiguration(cancellationToken);
+        if (active?.AuthorizedSender is null)
+        {
+            return Failure(state, "Microsoft 365 has no active RelayBridge configuration to verify.");
+        }
+
+        var identity = await _identityTester.TestAsync(cancellationToken).ConfigureAwait(false);
+        if (!identity.Succeeded)
+        {
+            return Failure(
+                state,
+                PlainIdentityVerificationMessage(identity.ErrorCategory),
+                identity.TechnicalCode ?? identity.ErrorCategory?.ToString(),
+                identity.CorrelationId);
+        }
+
+        var current = _database.GetActiveMicrosoftConfiguration(cancellationToken);
+        if (current?.AuthorizedSender is null ||
+            !string.Equals(current.Fingerprint, active.Fingerprint, StringComparison.Ordinal))
+        {
+            return Failure(
+                state,
+                "The active Microsoft configuration changed during verification. Review the current configuration and try again.");
+        }
+
+        ExchangeDeliveryDiagnosticResult exchange;
+        try
+        {
+            exchange = await _exchangeTester.VerifyAuthenticationAsync(
+                current.AuthorizedSender,
+                current.Identity,
+                current.Fingerprint,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return Failure(state, "Microsoft connection verification was cancelled.", "Cancelled");
+        }
+
+        if (exchange.Outcome != DeliveryOutcome.Success)
+        {
+            return Failure(
+                state,
+                PlainConnectionVerificationMessage(exchange.ErrorCategory),
+                ExchangeTechnicalCode(exchange),
+                exchange.CorrelationId.ToString("D"));
+        }
+
+        return new MicrosoftSetupOperationResult(
+            true,
+            "RelayBridge acquired an Exchange token and completed STARTTLS and XOAUTH2 authentication for the active sender. No email was sent.",
+            state);
     }
 
     public MicrosoftSetupState SelectCertificate(
@@ -684,6 +751,28 @@ public sealed class MicrosoftSetupService
             state.Certificate);
     }
 
+    private static bool IsSameActiveConfiguration(
+        MicrosoftSetupState? completedState,
+        ActiveMicrosoftConfiguration? activeConfiguration)
+    {
+        return completedState is not null &&
+            activeConfiguration?.AuthorizedSender is not null &&
+            completedState.Lifecycle == MicrosoftSetupCandidateLifecycle.Activated &&
+            completedState.ActivationId == activeConfiguration.ActivationId &&
+            completedState.TenantId == activeConfiguration.Identity.TenantId &&
+            completedState.ClientId == activeConfiguration.Identity.ClientId &&
+            completedState.Certificate is not null &&
+            string.Equals(
+                completedState.Certificate.Thumbprint,
+                activeConfiguration.Identity.Certificate.Thumbprint,
+                StringComparison.Ordinal) &&
+            completedState.Certificate.StoreLocation == activeConfiguration.Identity.Certificate.StoreLocation &&
+            string.Equals(
+                completedState.SenderMailbox,
+                activeConfiguration.AuthorizedSender,
+                StringComparison.OrdinalIgnoreCase);
+    }
+
     private static NativeMicrosoftCandidateIdentity CreateNativeCandidateIdentity(MicrosoftSetupState state)
     {
         return new NativeMicrosoftCandidateIdentity(
@@ -769,6 +858,44 @@ public sealed class MicrosoftSetupService
             "Network" or "DNS" or "Timeout" =>
                 "RelayBridge could not reach Exchange Online. Check DNS, outbound TCP port 587, and network connectivity.",
             _ => "Exchange Online did not accept the RelayBridge verification message.",
+        };
+    }
+
+    private static string PlainIdentityVerificationMessage(MicrosoftIdentityErrorCategory? category)
+    {
+        return category switch
+        {
+            MicrosoftIdentityErrorCategory.CertificateMissing =>
+                "The configured Microsoft authentication certificate is not available on this computer.",
+            MicrosoftIdentityErrorCategory.CertificateExpired =>
+                "The configured Microsoft authentication certificate has expired.",
+            MicrosoftIdentityErrorCategory.PrivateKeyUnavailable =>
+                "RelayBridge cannot use the configured Microsoft authentication certificate private key.",
+            MicrosoftIdentityErrorCategory.CertificateInvalid or MicrosoftIdentityErrorCategory.InvalidConfiguration =>
+                "The saved Microsoft identity configuration or certificate is not currently usable.",
+            MicrosoftIdentityErrorCategory.NetworkFailure =>
+                "RelayBridge could not reach Microsoft identity services. Check DNS and Internet connectivity.",
+            MicrosoftIdentityErrorCategory.Cancelled =>
+                "Microsoft connection verification was cancelled.",
+            _ =>
+                "Microsoft rejected or could not verify the saved RelayBridge application identity.",
+        };
+    }
+
+    private static string PlainConnectionVerificationMessage(string? category)
+    {
+        return category switch
+        {
+            "Authentication" or "Authorization" =>
+                "RelayBridge reached Exchange Online, but XOAUTH2 authentication for the active sender was denied. Check SMTP AUTH and the existing scoped Exchange authorization.",
+            "TLS" =>
+                "RelayBridge could not establish a trusted STARTTLS connection to Exchange Online.",
+            "Network" or "DNS" or "Timeout" =>
+                "RelayBridge could not reach Exchange Online. Check DNS, outbound TCP port 587, and network connectivity.",
+            "Protocol" =>
+                "Exchange Online did not complete the expected secure SMTP authentication sequence.",
+            _ =>
+                "RelayBridge could not verify the active Exchange SMTP connection.",
         };
     }
 

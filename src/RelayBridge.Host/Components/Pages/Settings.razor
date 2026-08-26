@@ -3,8 +3,12 @@
 @page "/settings"
 @rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
 @using Microsoft.Extensions.Options
+@using RelayBridge.Infrastructure.Queue
 @using RelayBridge.Infrastructure.Smtp
+@inject IWebHostEnvironment HostEnvironment
+@inject IJSRuntime JavaScript
 @inject IOptions<SmtpListenerOptions> Listener
+@inject IOptions<QueueOptions> Queue
 @inject DeviceEndpointAdvisor Endpoints
 
 <PageTitle>Settings · RelayBridge</PageTitle>
@@ -60,8 +64,32 @@
             }
             else
             {
-                <p>Save this complete JSON document as a RelayBridge configuration override, then restart RelayBridge:</p>
+                <div class="warning-panel" role="status">
+                    <strong>NOT YET APPLIED</strong>
+                    <p>RelayBridge has generated the configuration only. Download or copy it, place it at the exact destination below from an elevated PowerShell window, and restart the service.</p>
+                </div>
+                <h3>Generated printer-connectivity configuration</h3>
                 <pre class="configuration-example"><code>@ConfigurationExample</code></pre>
+                <div class="actions">
+                    <button class="button primary" @onclick="DownloadConfigurationAsync">Download configuration</button>
+                    <button class="button secondary" @onclick="CopyConfigurationAsync">Copy configuration</button>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_notice))
+                {
+                    <p class="notice" role="status">@_notice</p>
+                }
+                <dl class="stacked-details connectivity-details">
+                    <div><dt>Configuration destination</dt><dd><code>@ConfigurationDestination</code></dd></div>
+                    <div><dt>Queue processing after restart</dt><dd>Enabled</dd></div>
+                    <div><dt>Changes currently applied</dt><dd>No</dd></div>
+                </dl>
+                <h3>Apply from elevated PowerShell</h3>
+                <p class="guidance">Run PowerShell as Administrator. If your browser saved the download elsewhere, adjust only the first command's source path.</p>
+                <pre class="configuration-example"><code>@AdministratorCommands</code></pre>
+                <h3>Windows Firewall</h3>
+                <p class="guidance">The installer intentionally does not create a firewall rule. If Windows Firewall blocks the printer, run this command manually as Administrator. It is limited to the RelayBridge Host executable, the selected local address and port, the Private profile, and the local subnet. Replace <code>LocalSubnet</code> with the printer's exact IP address or a narrower trusted subnet when appropriate.</p>
+                <pre class="configuration-example"><code>@FirewallCommand</code></pre>
+                <p class="guidance">This command is guidance only. RelayBridge has not changed Windows Firewall.</p>
             }
         }
     }
@@ -80,6 +108,7 @@
             <div><dt>Port</dt><dd>@Listener.Value.Port</dd></div>
             <div><dt>SMTP authentication</dt><dd>@(Listener.Value.AllowCleartextAuthentication ? "Enabled on trusted LAN" : "Disabled")</dd></div>
             <div><dt>Inbound STARTTLS</dt><dd>Not available</dd></div>
+            <div><dt>Queue processing</dt><dd>@(Queue.Value.Enabled ? "Enabled" : "Disabled")</dd></div>
             <div><dt>Maximum message</dt><dd>@FormatBytes(Listener.Value.MaxMessageBytes)</dd></div>
         </dl>
     </article>
@@ -93,6 +122,17 @@
     </article>
 </section>
 
+<section class="settings-preview" aria-labelledby="after-restart-heading">
+    <div><p class="eyebrow">Verification</p><h2 id="after-restart-heading">After the service restarts</h2></div>
+    <ol>
+        <li>Return to this page and confirm the listener shows the selected private address and port.</li>
+        <li>Confirm <strong>Queue processing</strong> shows Enabled.</li>
+        <li>Open <a href="/health">service health</a> and confirm it responds successfully.</li>
+        <li>Open <a href="/diagnostics">Diagnostics</a> and confirm the SMTP listener is available and the active Microsoft configuration remains present.</li>
+    </ol>
+    <p class="guidance">The management UI remains available only from this computer. Restarting intentionally resets current-process Microsoft verification evidence; it does not delete the active Microsoft configuration.</p>
+</section>
+
 <div class="warning-panel">
     <strong>Trusted-LAN compatibility</strong>
     <p>Inbound TLS certificate provisioning is deferred. Do not expose RelayBridge SMTP to the Internet. Cleartext device authentication, when deliberately enabled, is suitable only for a trusted private network with strict per-device IP and sender restrictions.</p>
@@ -101,6 +141,7 @@
 @code {
     private DeviceEndpointAdvice Advice = null!;
     private string? _selectedAddress;
+    private string? _notice;
     protected override void OnInitialized()
     {
         Advice = Endpoints.GetAdvice();
@@ -111,5 +152,28 @@
     }
     private string ConfigurationExample =>
         SmtpDeploymentConfiguration.Create(_selectedAddress!, Listener.Value.Port);
+    private string ConfigurationDestination =>
+        SmtpDeploymentConfiguration.GetEnvironmentOverridePath(
+            HostEnvironment.ContentRootPath,
+            HostEnvironment.EnvironmentName);
+    private string DownloadFileName =>
+        SmtpDeploymentConfiguration.GetDownloadFileName(HostEnvironment.EnvironmentName);
+    private string AdministratorCommands =>
+        SmtpDeploymentConfiguration.CreateAdministratorCommands(ConfigurationDestination, DownloadFileName);
+    private string FirewallCommand =>
+        SmtpDeploymentConfiguration.CreateFirewallCommand(
+            _selectedAddress!,
+            Listener.Value.Port,
+            Path.Combine(AppContext.BaseDirectory, "RelayBridge.Host.exe"));
+    private async Task DownloadConfigurationAsync()
+    {
+        await JavaScript.InvokeVoidAsync("relayBridge.downloadText", DownloadFileName, ConfigurationExample);
+        _notice = $"Downloaded {DownloadFileName}. The configuration is still not applied.";
+    }
+    private async Task CopyConfigurationAsync()
+    {
+        await JavaScript.InvokeVoidAsync("relayBridge.copyText", ConfigurationExample);
+        _notice = "Copied the generated configuration. It is still not applied.";
+    }
     private static string FormatBytes(long bytes) => $"{bytes / (1024d * 1024d):0.#} MiB";
 }

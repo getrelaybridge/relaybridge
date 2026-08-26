@@ -94,13 +94,62 @@ public sealed class ExchangeSmtpOAuthProvider : IMailDeliveryProvider
             activeConfiguration?.Identity);
     }
 
-    internal async Task<DeliveryResult> DeliverAsync(
+    internal Task<DeliveryResult> DeliverAsync(
         QueuedMessage message,
         Stream messageContent,
         IMicrosoftTokenProvider tokenProvider,
         CancellationToken cancellationToken,
         string? configurationFingerprint = null,
         MicrosoftIdentityConfiguration? capturedConfiguration = null)
+    {
+        return DeliverCoreAsync(
+            message,
+            messageContent,
+            tokenProvider,
+            cancellationToken,
+            configurationFingerprint,
+            capturedConfiguration,
+            stopAfterAuthentication: false);
+    }
+
+    internal Task<DeliveryResult> VerifyAuthenticationAsync(
+        Guid correlationId,
+        string mailbox,
+        MicrosoftIdentityConfiguration capturedConfiguration,
+        string configurationFingerprint,
+        CancellationToken cancellationToken)
+    {
+        var attemptedAt = _timeProvider.GetUtcNow();
+        var operation = new QueuedMessage(
+            correlationId,
+            Guid.Empty,
+            mailbox,
+            [mailbox],
+            attemptedAt,
+            0,
+            $"verification-{correlationId:N}.eml",
+            QueueState.Delivering,
+            AttemptCount: 1,
+            LastAttemptUtc: attemptedAt,
+            PayloadPresent: false);
+        return DeliverCoreAsync(
+            operation,
+            Stream.Null,
+            _tokenProvider,
+            cancellationToken,
+            configurationFingerprint,
+            capturedConfiguration,
+            stopAfterAuthentication: true);
+    }
+
+    private async Task<DeliveryResult> DeliverCoreAsync(
+        QueuedMessage message,
+        Stream messageContent,
+        IMicrosoftTokenProvider tokenProvider,
+        CancellationToken cancellationToken,
+        string? configurationFingerprint,
+        MicrosoftIdentityConfiguration? capturedConfiguration,
+        bool stopAfterAuthentication)
     {
         ArgumentNullException.ThrowIfNull(message);
         ArgumentNullException.ThrowIfNull(messageContent);
@@ -271,6 +320,11 @@ public sealed class ExchangeSmtpOAuthProvider : IMailDeliveryProvider
             stage = DeliveryStage.Authenticated;
             _runtimeState.RecordStage(attempt, "XOAUTH2");
             _logger.LogInformation("ExchangeAuthenticationSucceeded MessageId={MessageId}", message.Id);
+            if (stopAfterAuthentication)
+            {
+                await TryQuitAsync(stream).ConfigureAwait(false);
+                return Record(attempt, message, DeliveryResult.Succeeded(), authenticationVerification: true);
+            }
 
             var mailCommand = capabilities.Size
                 ? $"MAIL FROM:<{message.EnvelopeFrom}> SIZE={message.SizeBytes}"
@@ -728,7 +782,7 @@ public sealed class ExchangeSmtpOAuthProvider : IMailDeliveryProvider
         catch (Exception exception) when (
             exception is IOException or SocketException or TimeoutException or SmtpProtocolException or AuthenticationException or ObjectDisposedException)
         {
-            _logger.LogDebug("Exchange QUIT failed after final acceptance: {ErrorType}", exception.GetType().Name);
+            _logger.LogDebug("Exchange QUIT failed after the SMTP operation: {ErrorType}", exception.GetType().Name);
         }
     }
 
@@ -764,9 +818,17 @@ public sealed class ExchangeSmtpOAuthProvider : IMailDeliveryProvider
     private DeliveryResult Record(
         MicrosoftAttemptContext attempt,
         QueuedMessage message,
-        DeliveryResult result)
+        DeliveryResult result,
+        bool authenticationVerification = false)
     {
-        _runtimeState.RecordResult(attempt, _timeProvider.GetUtcNow(), result);
+        if (authenticationVerification && result.Outcome == DeliveryOutcome.Success)
+        {
+            _runtimeState.RecordAuthenticationVerificationSuccess(attempt, _timeProvider.GetUtcNow());
+        }
+        else
+        {
+            _runtimeState.RecordResult(attempt, _timeProvider.GetUtcNow(), result);
+        }
         if (result.Outcome == DeliveryOutcome.TransientFailure)
         {
             _logger.LogWarning(
