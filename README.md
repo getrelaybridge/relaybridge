@@ -22,8 +22,8 @@ identity remain open. WiX Toolset 6 compliance is closed for the current individ
 non-revenue-generating use and must be reassessed if that status changes. See
 [docs/release/release-gates.md](docs/release/release-gates.md).
 
-RelayBridge is ready for public source review and contribution, but it has not yet issued a
-public production release. It was created and is maintained by
+RelayBridge source is public and open for review and contribution, but it has not yet issued an
+official Windows binary release. It was created and is maintained by
 [@yuvaraj-builds-ai](https://github.com/yuvaraj-builds-ai), with
 contributions reviewed through the maintainer-led process in [CONTRIBUTING.md](CONTRIBUTING.md).
 

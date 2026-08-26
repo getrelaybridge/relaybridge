@@ -102,7 +102,8 @@ reproducible bypass was demonstrated. The observation is recorded without reopen
 - public release signing gate: open
 - offline Microsoft-module acquisition: future/not implemented
 
-These gates prohibit external publication. This document is technical evidence, not legal advice.
+These gates prohibit external Windows binary publication. This document is technical evidence, not
+legal advice.
 
 ## Freeze
 

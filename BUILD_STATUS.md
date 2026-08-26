@@ -9,14 +9,15 @@ coverage, and produces a CycloneDX 1.6 release SBOM plus categorized third-party
 M9.1, M8, M7, and M5.1 are frozen. Schema remains v9. No Microsoft authentication, tenant
 mutation, or Exchange delivery was part of M9 acceptance.
 
-OSS-1 public-source readiness is implemented for review: RelayBridge-owned source is licensed
-under MPL-2.0, project metadata and deterministic license checks agree, governance and security
-reporting files are public-facing, and current plus reachable-history scans found no committed
-secrets or private artifacts. RP-1 adds a deterministic source-only public export, public release
-CI/origin-verification foundation, SignPath pre-application policy, exact WiX v6.0.2 notices/source,
-and corrected SBOM runtime classification. This does not authorize binary publication; signing and
-Microsoft license clarification remain open. WiX OSMF/license compliance is closed for the current
-individual, non-revenue-generating use and requires re-evaluation if use becomes revenue-generating.
+RelayBridge source is public at `https://github.com/getrelaybridge/relaybridge` from an intentional
+fresh-history snapshot. RelayBridge-owned source is licensed under MPL-2.0, project metadata and
+deterministic license checks agree, governance and security reporting files are public-facing, and
+current plus reachable-history scans found no committed secrets or private artifacts. RP-1 adds a
+deterministic source-only public export, public release CI/origin-verification foundation, SignPath
+pre-application policy, exact WiX v6.0.2 notices/source, and corrected SBOM runtime classification.
+This does not authorize binary publication; signing and Microsoft license clarification remain
+open. WiX OSMF/license compliance is closed for the current individual, non-revenue-generating use
+and requires re-evaluation if use becomes revenue-generating.
 
 ## Implemented
 
@@ -626,15 +627,14 @@ individual, non-revenue-generating use and requires re-evaluation if use becomes
 - solution-wide format verification still reports pre-existing mixed LF/CRLF lines in
   `ExchangeWamConsoleLease.cs` and `PowerShellProcessRunner.cs`; neither file belongs to this
   closure diff, so they were not mass-reformatted
+- the final finite public-repository audit verified all reachable public commits use the expected GitHub
+  noreply identity, checksum-verified Gitleaks 8.30.1 found no current-tree or reachable-history
+  leaks, NuGet reported no vulnerable direct or transitive solution/WiX packages, the Release build
+  passed with 0 warnings/errors, all 483 tests passed with no skips, and the unsigned installer plus
+  SBOM/notices validation passed; no binary was published or signed
 
 ## Known issues
 
-- The future public repository must be created from the clean source snapshot with fresh history.
-  Before its first commit, the owner must configure the exact GitHub noreply identity and confirm
-  GitHub MFA; the private engineering `.git` history and milestone tags are not public inputs.
-- During OSS-1 verification, the command-flood integration test failed once in a full run, then
-  passed 10/10 focused repetitions and the next complete 483-test run. No product regression was
-  reproduced; retain it as a low-risk timing-stability observation.
 - WiX Toolset 6 OSMF/license compliance is closed for the current individual,
   non-revenue-generating use. It must be rechecked if use becomes revenue-generating. This is a
   release-compliance record, not legal advice.
@@ -758,8 +758,8 @@ individual, non-revenue-generating use and requires re-evaluation if use becomes
 
 ## Next step
 
-M9 remains frozen. Complete the RP-1 owner actions: configure the exact GitHub noreply identity,
-confirm GitHub MFA, create the public source repository from the verified fresh-history snapshot,
+M9 remains frozen. The public source repository, fresh history, GitHub noreply identity, main-branch
+ruleset, and public-repository security controls are in place. Confirm GitHub MFA remains enabled
 and send the narrow SignPath first-release inquiry. Do not begin M10 automatically. SignPath,
 Authenticode, and written Microsoft redistribution/missing-license-file clarification remain open;
 external Windows binary publication remains prohibited.

@@ -21,9 +21,11 @@ or acquisition boundaries.
 
 ## Release boundaries
 
-M9 does not close public-release gates. Microsoft redistribution clarification, the Graph package
-missing-`license.txt` clarification, WiX Toolset 6 OSMF compliance, and a trusted Authenticode
-identity remain open. External publication is prohibited.
+M9 does not close Windows binary-release gates. Microsoft redistribution clarification, the Graph
+package missing-`license.txt` clarification, and a trusted Authenticode identity remain open. WiX
+Toolset 6 OSMF/license compliance is closed for the current individual, non-revenue-generating use
+and must be re-evaluated if use becomes revenue-generating. External Windows binary publication is
+prohibited.
 
 ## Acceptance
 
