@@ -1,22 +1,25 @@
-# RelayBridge — Master Vibe-Coding Prompt
+# RelayBridge — Master Product Specification
 
-## 0. Your Role
+## 0. Document Purpose and Current State
 
-You are acting as the:
+This public document records RelayBridge's product direction, architecture constraints, security
+invariants, supported behavior, non-goals, and milestone structure. It is not a private engineering
+prompt or a substitute for current implementation evidence.
 
-- principal .NET engineer
-- software architect
-- security engineer
-- SMTP/email protocol engineer
-- UX engineer
-- test engineer
-- release engineer
+`BUILD_STATUS.md` and the applicable documents under `docs/milestones/` are authoritative for what
+is implemented and verified at the current revision. At present:
 
-for an open-source application called **RelayBridge**.
+- Milestone 9 product hardening is frozen.
+- Milestone 10 has not started.
+- RelayBridge source is public under MPL-2.0.
+- Official Windows binaries have not been released.
 
-Your job is not to demonstrate architectural sophistication.
+The milestone sections below preserve the incremental product plan. They do not authorize
+re-running completed milestones, starting Milestone 10, or publishing binaries. Contributors and
+coding agents must follow `AGENTS.md` and `CONTRIBUTING.md`.
 
-Your job is to create a **small, understandable, secure, reliable, high-performance production application** that solves one problem extremely well.
+RelayBridge should remain a **small, understandable, secure, reliable, high-performance production
+application** that solves one problem extremely well.
 
 The application must eventually be something an IT administrator or copier technician can confidently deploy at a customer site.
 
@@ -282,7 +285,7 @@ But avoid unnecessary Windows-only dependencies inside the core mail engine.
 
 # 8. One Process
 
-RelayBridge V1 should preferably run as **one executable / one Windows Service**.
+RelayBridge V1 has one long-running product process: the **RelayBridge Windows Service**.
 
 The service should host:
 
@@ -295,7 +298,11 @@ Microsoft authentication
 outbound SMTP
 ```
 
-Do NOT create separate processes for these.
+Do NOT create separate long-running processes for these responsibilities.
+
+Short-lived setup executables are an intentional security boundary: a NativeAOT launcher and its
+subordinate managed worker perform interactive Microsoft administration, then exit. They are not
+mail-delivery services, listeners, or persistent administration processes.
 
 Do NOT create:
 
@@ -321,7 +328,7 @@ One process reduces:
 
 # 9. Keep the Solution Small
 
-Start with approximately:
+The core solution remains approximately:
 
 ```text
 RelayBridge.sln
@@ -339,6 +346,10 @@ docs/
 
 installer/
 ```
+
+The current repository also contains narrow Setup, SetupLauncher, and ToolingProvisioner projects
+plus small test probes. Their concrete security/process boundaries are documented in
+`docs/architecture/overview.md`; they are not a basis for adding more layers or services.
 
 Responsibilities:
 
@@ -821,7 +832,7 @@ RelayBridge accepts SMTP from printers.
 
 Support only functionality needed for realistic MFP operation.
 
-Likely:
+Current inbound command support:
 
 ```text
 HELO
@@ -834,11 +845,13 @@ NOOP
 QUIT
 AUTH LOGIN
 AUTH PLAIN
-STARTTLS
 SIZE
 ```
 
-Potentially:
+Inbound STARTTLS is not implemented or advertised in the current frozen M9 source. A `STARTTLS`
+command receives a not-available response. `8BITMIME` and `SMTPUTF8` are also not advertised.
+
+Potential future extensions:
 
 ```text
 8BITMIME
@@ -853,14 +866,15 @@ Do not advertise unsupported SMTP extensions.
 
 # 25. Default SMTP Listener
 
-Default:
+Current default:
 
 ```text
 Port: 2525
-Authentication: Required
+Binding: Loopback
+Cleartext SMTP authentication: Disabled
 Anonymous relay: Disabled
 Internet exposure: Not supported/recommended
-STARTTLS: Available
+STARTTLS: Not available
 ```
 
 Do not automatically use port 25.
@@ -871,25 +885,18 @@ Allow administrator configuration.
 
 # 26. Printer Security Modes
 
-Provide exactly three understandable modes.
+The current device wizard exposes two understandable modes.
 
-## Secure
+## Authenticated / Compatible
 
 ```text
-STARTTLS required
 SMTP authentication required
 IP restriction
 sender restriction
 ```
 
-## Compatible
-
-```text
-STARTTLS optional
-SMTP authentication required
-IP restriction
-sender restriction
-```
+Because inbound STARTTLS is not yet available, cleartext SMTP authentication is disabled by
+default and can be enabled only on one explicit trusted private interface with a prominent warning.
 
 ## Legacy
 
@@ -1357,11 +1364,9 @@ Do not kill a slow but valid 25 MB scan because of an unrealistically short fixe
 
 # 43. TLS
 
-Inbound STARTTLS:
-
-- optional based on device mode
-- recommended
-- required in Secure mode
+Inbound STARTTLS is not implemented in the current frozen M9 source and is not advertised. Until a
+certificate-backed inbound TLS design is implemented, cleartext SMTP authentication remains
+disabled by default and may be enabled only on an explicit trusted private interface.
 
 Outbound Microsoft SMTP:
 
@@ -1550,10 +1555,8 @@ Does this printer support SMTP authentication?
 ○ No
 ○ Not sure
 
-Does this printer support STARTTLS?
-● Yes
-○ No
-○ Not sure
+Inbound TLS
+Not available in this release
 ```
 
 RelayBridge chooses the recommended security profile.
@@ -1570,7 +1573,7 @@ Port
 2525             [ Copy ]
 
 Security
-STARTTLS
+No TLS — trusted private LAN only
 
 Username
 ricoh-reception  [ Copy ]
@@ -1616,7 +1619,8 @@ instead.
 
 # 51. Live Troubleshooting
 
-This is one of RelayBridge's most important differentiators.
+The following is target UX for a later live per-session timeline. Current M9 provides privacy-safe
+diagnostic summaries and persisted message metadata; polished live SMTP timelines remain deferred.
 
 Success example:
 
@@ -2040,10 +2044,10 @@ Reliability is a feature.
 
 # 67. Installer
 
-Goal:
+Current unsigned candidate name:
 
 ```text
-RelayBridge-Setup-x64.exe
+RelayBridge-Setup-<version>-win-x64.exe
 ```
 
 User should not manually install:
@@ -2055,7 +2059,7 @@ User should not manually install:
 - SQL Server
 - Node.js
 
-Installer should:
+The current WiX 6 MSI/Burn pipeline:
 
 ```text
 install files
@@ -2063,33 +2067,22 @@ create data directories
 apply secure ACLs
 install Windows Service
 configure automatic startup
-optionally add firewall rule
 start service
-open setup UI
+register the parameter-free local setup URI
 ```
 
 Upgrade must preserve configuration.
 
-Uninstall should ask whether to preserve configuration/data.
+No firewall rule or unstable management shortcut is created. Uninstall preserves ProgramData and
+does not alter certificates or Microsoft tenant objects.
 
 ---
 
 # 68. Installer Technology
 
-Do not choose installer technology based on habit.
-
-Evaluate current:
-
-- licensing
-- maintenance
-- signing support
-- upgrade behavior
-- service support
-- open-source compatibility
-
-Choose the simplest reliable solution.
-
-Create an ADR for the decision.
+WiX Toolset 6.0.2 is the selected Windows installer technology. The decision, licensing boundary,
+service/upgrade behavior, and non-goals are recorded in
+`docs/architecture/decisions/ADR-0005-wix-msi-windows-installer.md` and the M8 milestone document.
 
 ---
 
@@ -2105,25 +2098,10 @@ Unsigned development builds should remain easy.
 
 # 70. Local Web Security
 
-Management UI requires authentication.
-
-Choose a straightforward secure model.
-
-Avoid creating an enterprise identity platform inside RelayBridge.
-
-Possible V1:
-
-```text
-local admin account
-strong password hashing
-secure session cookie
-CSRF protection
-login throttling
-```
-
-Or another well-justified local Windows-integrated model.
-
-Document the decision.
+The current management UI is deliberately loopback-only and has no production remote-management
+authentication model. Code-owned binding validation rejects non-loopback effective listeners at
+startup. Authenticated remote management remains deferred; do not expose the current UI beyond
+loopback or weaken the binding checks.
 
 ---
 
@@ -2133,7 +2111,7 @@ First launch must never result in:
 
 ```text
 open SMTP relay
-anonymous admin panel
+non-loopback anonymous admin panel
 unrestricted Internet listener
 ```
 
@@ -2362,9 +2340,9 @@ Prefer calm appliance UI.
 
 # 83. Configuration Backup
 
-V1 must support safe configuration export.
+Safe configuration export is not implemented in the current frozen M9 source and remains deferred.
 
-Default export should exclude secrets.
+Any future default export must exclude secrets.
 
 An encrypted full backup may come later.
 
@@ -2396,7 +2374,7 @@ Reliable.
 
 # 85. Open-Source Repository
 
-Create:
+Maintain:
 
 ```text
 README.md
@@ -2555,6 +2533,10 @@ tested
 understandable
 runnable
 ```
+
+Milestones 0 through 9 are implemented historical boundaries; M9 is frozen and M10 has not
+started. The individual milestone documents and `BUILD_STATUS.md` supersede the original planning
+language below when recording actual implementation or verification status.
 
 ---
 
@@ -2732,8 +2714,8 @@ STOP.
 Implement:
 
 ```text
-live SMTP trace
-message history
+diagnostic status and bounded probes
+privacy-conscious message metadata/history
 plain-English errors
 health status
 diagnostic bundle
@@ -2749,12 +2731,11 @@ STOP.
 Implement:
 
 ```text
-self-contained Windows x64 publish
-installer
+framework-dependent Host/worker and self-contained NativeAOT helper publishing
+WiX MSI/Burn installer
 Windows Service registration
-firewall option
 secure ACLs
-first-run browser launch
+parameter-free local setup URI
 upgrade
 uninstall
 ```
@@ -2805,7 +2786,7 @@ release package
 
 ---
 
-# 102. Rules for Vibe Coding
+# 102. Rules for AI-Assisted Contributions
 
 Because this project is being heavily AI-assisted, follow these rules carefully.
 
@@ -3190,37 +3171,13 @@ The goal is:
 
 ---
 
-# 115. FIRST INSTRUCTION
+# 115. Current Work Boundary
 
-Begin with **Milestone 0 only**.
+Milestone 9 is frozen. Do not reopen completed milestone architecture without a concrete reproduced
+defect, do not begin Milestone 10 automatically, and do not publish or describe development
+artifacts as official Windows releases.
 
-Before writing code:
-
-1. Inspect the environment/repository.
-2. Verify .NET 10 SDK availability.
-3. Read current official Microsoft SMTP OAuth and Exchange Application RBAC documentation.
-4. Validate the architectural assumptions in ADR-0001.
-5. Investigate the outbound SMTP library question for ADR-0002.
-6. Create only the minimum solution structure needed.
-7. Build it.
-8. Test it.
-9. Update BUILD_STATUS.md.
-10. Stop.
-
-Do not continue to Milestone 1.
-
-Do not start implementing SMTP simply because you have remaining context.
-
-At the end report only:
-
-```text
-Milestone 0 status
-
-Created
-Architecture decisions
-Build result
-Tests run
-Security observations
-Open technical questions
-Recommended next step
-```
+For every requested change, inspect the current repository, use the smallest coherent scope, run
+the relevant Release build/tests and repository verifiers, update `BUILD_STATUS.md` when project
+state changes, and follow the protected-main contribution workflow in `AGENTS.md` and
+`CONTRIBUTING.md`.
