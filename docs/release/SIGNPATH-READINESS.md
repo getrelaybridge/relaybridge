@@ -11,9 +11,9 @@ advice. The authoritative conditions are maintained by SignPath Foundation.
 | OSI-approved license without commercial dual license | PASS | RelayBridge-owned source is MPL-2.0 only. Third-party OSS components retain their OSI-approved licenses. |
 | No proprietary project code | PASS | The signed candidate is built from RelayBridge MPL source plus reviewed OSS/runtime components; Graph/Entra package bytes are acquired Microsoft-to-customer and are not embedded. See component review below. |
 | Maintained | PASS | The repository has current milestones, tests, architecture, security, and release documentation. |
-| Already released in the form to sign | ACTION REQUIRED | Source is being prepared for its first public repository; official Windows binaries have not been released. SignPath clarification is required before the first signed Windows release. |
+| Already released in the form to sign | ACTION REQUIRED | Source is public, but official Windows binaries have not been released. SignPath clarification is required before the first signed Windows release. |
 | Functionality documented | PASS | README, master specification, architecture, setup, security, and operational diagnostics are documented. |
-| Development and signing team controls source/build | PASS | The maintainer controls RelayBridge source and repository build scripts; public repository ownership must be established before application. |
+| Development and signing team controls source/build | PASS | The maintainer controls the public RelayBridge source repository and repository build scripts. |
 | Sign only project-owned binaries | PASS | The signing plan targets RelayBridge-owned PE/MSI/bootstrapper layers and explicitly excludes upstream binaries from RelayBridge signatures. |
 | Privacy/security behavior disclosed | PASS | The code-signing policy describes Microsoft/official-source network communication and states there is no RelayBridge-operated cloud service. |
 | System changes announced | PASS | Installer documentation identifies the service, URI handler, Program Files tooling, and preserved ProgramData. |
@@ -22,7 +22,7 @@ advice. The authoritative conditions are maintained by SignPath Foundation.
 | Team roles documented | PASS | Committer, reviewer, and approver roles are declared without inventing extra people. |
 | Code signing policy published | PASS (pre-application) | `CODE-SIGNING-POLICY.md` exists; the required SignPath attribution remains explicitly pending approval. |
 | Manual approval for each release | ACTION REQUIRED | Configure in SignPath after application approval. |
-| GitHub trusted build/origin verification | ACTION REQUIRED | Release workflow is repository-controlled and GitHub-hosted; install the SignPath GitHub App and configure repository, branch, commit, workflow, and artifact checks after the public repository exists. |
+| GitHub trusted build/origin verification | ACTION REQUIRED | Release workflow is repository-controlled and GitHub-hosted; install the SignPath GitHub App and configure repository, branch, commit, workflow, and artifact checks after SignPath approval. |
 | Artifact metadata restrictions | PASS (source ready) | Repository metadata sets product `RelayBridge`, consistent version input, company `RelayBridge contributors`, and an accurate description; SignPath artifact configuration remains to be created. |
 
 ## Proprietary-component review
@@ -62,11 +62,7 @@ Draft inquiry (not sent):
 
 ## Owner actions
 
-- Confirm GitHub MFA before making the repository public.
-- Configure the exact GitHub noreply commit identity before the first public root commit.
-- Create the public repository from the clean source snapshot with fresh history.
-- Enable branch protection/rulesets, least-privilege Actions permissions, private vulnerability
-  reporting, and Dependabot/security features appropriate to a public repository.
+- Confirm GitHub MFA remains enabled before applying to SignPath.
 - Send the narrow first-release inquiry; do not disclose internal credentials or unpublished
   binaries.
 - After eligibility confirmation, install the SignPath GitHub App and configure origin verification,

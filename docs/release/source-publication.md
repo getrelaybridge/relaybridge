@@ -46,7 +46,7 @@ individual, non-revenue-generating use and must be reviewed again if that status
 
 ## Public snapshot inventory
 
-The public repository is created from Git-tracked source only. It includes the root governance and
+The public repository was created from Git-tracked source only. It includes the root governance and
 build files plus `.github/`, `src/`, `tests/`, `installer/`, `eng/`, and `docs/`. This includes
 installer authoring, SBOM/notices generators, tooling locks, architecture/security documentation,
 and contribution templates.
@@ -57,9 +57,9 @@ caches, Graph/Entra package bytes, MSI/EXE/WiXPDB/PDB files, databases, mail/spo
 scratch, credentials, and test output. `eng/export-public-source.ps1` uses `git archive` against a
 clean committed revision; it does not recursively copy the workspace.
 
-The public repository starts with one fresh root commit and does not import private engineering
-commits or milestone tags. Before that commit, the maintainer must configure the exact GitHub
-noreply identity for `yuvaraj-builds-ai`; no private email may be used or inferred.
+The public repository began with one fresh root commit and did not import private engineering
+commits or milestone tags. All reachable public commits use the GitHub noreply identity for
+`yuvaraj-builds-ai`; no private email is used or inferred.
 
 Public source may be published before official Windows binaries. Each later binary release must
 refer to its exact corresponding public source tag. Official Windows binaries remain prohibited
