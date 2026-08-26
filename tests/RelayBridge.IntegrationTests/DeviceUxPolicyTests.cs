@@ -14,6 +14,7 @@ using RelayBridge.Core.Microsoft;
 using RelayBridge.Core.Queue;
 using RelayBridge.Host.Components;
 using RelayBridge.Host.Services;
+using RelayBridge.Infrastructure.Queue;
 using RelayBridge.Infrastructure.Smtp;
 using RelayBridge.Infrastructure.Microsoft;
 using Xunit;
@@ -263,6 +264,7 @@ public sealed class DeviceUxPolicyTests
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
         var configuration = new ConfigurationBuilder().AddJsonStream(stream).Build();
         var options = configuration.GetSection("Smtp").Get<SmtpListenerOptions>();
+        var queue = configuration.GetSection("Queue").Get<QueueOptions>();
 
         Assert.Equal(JsonValueKind.Object, document.RootElement.ValueKind);
         Assert.NotNull(options);
@@ -271,10 +273,73 @@ public sealed class DeviceUxPolicyTests
         Assert.Equal(2526, options.Port);
         Assert.True(options.AllowCleartextAuthentication);
         options.Validate();
+        Assert.NotNull(queue);
+        Assert.True(queue.Enabled);
+        queue.Validate();
         Assert.False(configuration.GetSection("Management").Exists());
+        Assert.Equal(2, document.RootElement.EnumerateObject().Count());
         Assert.DoesNotContain("password", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("secret", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("token", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Printer_connectivity_instructions_use_exact_override_path_and_scoped_manual_commands()
+    {
+        const string contentRoot = @"C:\Program Files\RelayBridge\Host";
+        var destination = SmtpDeploymentConfiguration.GetEnvironmentOverridePath(contentRoot, "Production");
+        var downloadName = SmtpDeploymentConfiguration.GetDownloadFileName("Production");
+        var apply = SmtpDeploymentConfiguration.CreateAdministratorCommands(destination, downloadName);
+        var firewall = SmtpDeploymentConfiguration.CreateFirewallCommand(
+            "192.168.50.10",
+            2525,
+            Path.Combine(contentRoot, "RelayBridge.Host.exe"));
+
+        Assert.Equal(@"C:\Program Files\RelayBridge\Host\appsettings.Production.json", destination);
+        Assert.Equal("RelayBridge-appsettings.Production.json", downloadName);
+        Assert.Contains("Copy-Item -LiteralPath", apply, StringComparison.Ordinal);
+        Assert.Contains($"-Destination '{destination}'", apply, StringComparison.Ordinal);
+        Assert.Contains("Restart-Service -Name 'RelayBridge'", apply, StringComparison.Ordinal);
+        Assert.Contains("New-NetFirewallRule", firewall, StringComparison.Ordinal);
+        Assert.Contains("-Direction Inbound", firewall, StringComparison.Ordinal);
+        Assert.Contains("-Profile Private", firewall, StringComparison.Ordinal);
+        Assert.Contains("-LocalAddress '192.168.50.10'", firewall, StringComparison.Ordinal);
+        Assert.Contains("-LocalPort 2525", firewall, StringComparison.Ordinal);
+        Assert.Contains("-RemoteAddress 'LocalSubnet'", firewall, StringComparison.Ordinal);
+        Assert.Contains("RelayBridge.Host.exe", firewall, StringComparison.Ordinal);
+        Assert.DoesNotContain("0.0.0.0", firewall, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Printer_connectivity_page_exposes_an_actionable_unapplied_workflow()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(), "src", "RelayBridge.Host", "Components", "Pages", "Settings.razor"));
+
+        Assert.Contains("NOT YET APPLIED", source, StringComparison.Ordinal);
+        Assert.Contains("Download configuration", source, StringComparison.Ordinal);
+        Assert.Contains("Copy configuration", source, StringComparison.Ordinal);
+        Assert.Contains("Configuration destination", source, StringComparison.Ordinal);
+        Assert.Contains("Queue processing after restart", source, StringComparison.Ordinal);
+        Assert.Contains("Apply from elevated PowerShell", source, StringComparison.Ordinal);
+        Assert.Contains("The installer intentionally does not create a firewall rule", source, StringComparison.Ordinal);
+        Assert.Contains("management UI remains available only from this computer", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("changes are applied", source, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Verify_connection_ui_is_separate_from_repair()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(), "src", "RelayBridge.Host", "Components", "Pages", "MicrosoftSetup.razor"));
+
+        Assert.Contains("@onclick=\"VerifyActiveConnectionAsync\">Verify connection", source, StringComparison.Ordinal);
+        Assert.Contains("@onclick=\"RepairAsync\">Repair connection", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "VerifyActiveConnectionAsync() => RunOperationAsync(Setup.VerifyActiveConnectionAsync)",
+            source,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("@onclick=\"RepairAsync\">Verify connection", source, StringComparison.Ordinal);
     }
 
     [Theory]

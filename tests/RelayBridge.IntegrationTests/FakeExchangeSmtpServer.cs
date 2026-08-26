@@ -206,6 +206,14 @@ internal sealed class FakeExchangeSmtpServer : IAsyncDisposable
 
             MailCommand = await ReadLineAsync(stream, cancellationToken);
             AddCommand(MailCommand);
+            if (string.Equals(MailCommand, "QUIT", StringComparison.OrdinalIgnoreCase))
+            {
+                QuitReceived = true;
+                MailCommand = null;
+                await WriteLineAsync(stream, "221 2.0.0 Bye", cancellationToken);
+                return;
+            }
+
             await WriteLineAsync(stream, _scenario.MailResult, cancellationToken);
             if (!IsPositiveCompletion(_scenario.MailResult) || _scenario.Disconnect == FakeExchangeDisconnect.AfterMail)
             {

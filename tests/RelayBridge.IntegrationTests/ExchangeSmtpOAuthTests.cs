@@ -152,6 +152,44 @@ public sealed class ExchangeSmtpOAuthTests
     }
 
     [Fact]
+    public async Task Authentication_verification_stops_after_xoauth2_without_starting_a_mail_transaction()
+    {
+        await using var server = new FakeExchangeSmtpServer();
+        server.Start();
+        var tokenProvider = new FakeTokenProvider();
+        var runtime = new ExchangeDeliveryRuntimeState();
+        var provider = CreateProvider(server, tokenProvider, runtimeState: runtime);
+        var configuration = MicrosoftIdentityConfiguration.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            MicrosoftCertificateReference.Create(
+                "0123456789ABCDEF0123456789ABCDEF01234567",
+                CertificateStoreTarget.LocalMachine));
+
+        var result = await provider.VerifyAuthenticationAsync(
+            Guid.NewGuid(),
+            "scanner@example.com",
+            configuration,
+            "active-fingerprint",
+            CancellationToken.None);
+
+        Assert.Equal(DeliveryOutcome.Success, result.Outcome);
+        Assert.Equal(1, tokenProvider.Calls);
+        Assert.Single(tokenProvider.ExplicitConfigurations);
+        Assert.True(server.QuitReceived);
+        Assert.Null(server.MailCommand);
+        Assert.DoesNotContain(server.Commands, command => command.StartsWith("MAIL FROM", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(server.Commands, command => command.StartsWith("RCPT TO", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(server.Commands, command => string.Equals(command, "DATA", StringComparison.OrdinalIgnoreCase));
+        var snapshot = runtime.GetCompletedSnapshot("active-fingerprint");
+        Assert.Equal(ExchangeDeliveryStatus.Healthy, snapshot.Status);
+        Assert.True(snapshot.TokenAcquired);
+        Assert.True(snapshot.XOAuth2Authenticated);
+        Assert.True(snapshot.SenderAuthorized);
+        Assert.False(snapshot.MessageAccepted);
+    }
+
+    [Fact]
     public void Data_termination_timeout_defaults_to_rfc_recommended_ten_minutes()
     {
         var options = new ExchangeSmtpOptions();

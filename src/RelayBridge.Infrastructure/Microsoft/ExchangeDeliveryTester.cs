@@ -74,6 +74,27 @@ public sealed class ExchangeDeliveryTester
             cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<ExchangeDeliveryDiagnosticResult> VerifyAuthenticationAsync(
+        string mailbox,
+        MicrosoftIdentityConfiguration capturedConfiguration,
+        string configurationFingerprint,
+        CancellationToken cancellationToken = default)
+    {
+        var correlationId = Guid.NewGuid();
+        var result = await _provider.VerifyAuthenticationAsync(
+            correlationId,
+            mailbox,
+            capturedConfiguration,
+            configurationFingerprint,
+            cancellationToken).ConfigureAwait(false);
+        return new ExchangeDeliveryDiagnosticResult(
+            result.Outcome,
+            result.ErrorCategory,
+            result.SafeMessage,
+            _runtimeState.GetCompletedSnapshot(configurationFingerprint),
+            correlationId);
+    }
+
     private async Task<ExchangeDeliveryDiagnosticResult> SendAsync(
         string envelopeSender,
         string recipient,

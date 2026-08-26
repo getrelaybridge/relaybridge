@@ -80,6 +80,13 @@ normal hostname/certificate-validated TLS handshake. It has one bounded deadline
 acquires a token or sends AUTH, MAIL, RCPT, DATA, or message content. The database quick
 check is likewise explicit rather than page-load work.
 
+The separate post-restart `Verify connection` action uses the active saved tenant, application,
+certificate, and sender configuration. It validates certificate/private-key access, acquires the
+normal Exchange token, and reuses the production SMTP path through DNS, TCP, STARTTLS with platform
+certificate validation, and XOAUTH2 authentication, then sends QUIT. It sends no MAIL, RCPT, DATA,
+or message content, performs no tenant provisioning, and does not replace or reactivate the saved
+configuration. `Repair connection` remains the explicit route into the provisioning workflow.
+
 Support bundles are generated locally in memory from fixed anonymous allowlist projections,
 use a versioned fixed entry list and size cap, and are never uploaded by RelayBridge. Raw
 configuration, SQLite, logs, spool files, addresses, message data, password/verifier data,
@@ -239,8 +246,12 @@ then verifies the reviewed Microsoft fingerprint and sender in the same SQLite i
 transaction. A change creates no device. Microsoft remains first, then
 a LAN-reachable listener, then authenticated intake where the chosen device mode
 requires it. The listener remains startup-bound and is not mutated by the UI.
-Printer-connectivity preparation instead emits exact deployment configuration and
-safe active private-address candidates, followed by a required service restart.
+Printer-connectivity preparation instead emits bounded deployment configuration containing the
+selected listener and `Queue.Enabled=true`, plus safe active private-address candidates. The
+administrator can download or copy it, is shown the exact environment override destination and
+safely quoted elevated copy/restart commands, and receives manual firewall guidance scoped to the
+selected local address, port, Host executable, Private profile, and local subnet. The UI does not
+write privileged configuration, restart the service, or alter Windows Firewall automatically.
 Setup and detail views share the same address renderer; multiple network rules are
 edited and persisted as a complete visible collection rather than silently reduced.
 

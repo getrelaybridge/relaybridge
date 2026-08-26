@@ -336,7 +336,10 @@
                     <p class="eyebrow">Existing configuration</p>
                     <h1>@(RuntimeReadiness == MicrosoftRuntimeReadiness.NeedsAttention ? "Microsoft 365 needs attention" : "Microsoft 365 verification required")</h1>
                     <p class="lead">The saved setup completed previously, but RelayBridge has not reverified Exchange and sender authorization during this service start.</p>
-                    <button class="button primary" disabled="@_busy" @onclick="RepairAsync">Verify connection</button>
+                    <div class="actions">
+                        <button class="button primary" disabled="@_busy" @onclick="VerifyActiveConnectionAsync">Verify connection</button>
+                        <button class="button secondary" disabled="@_busy" @onclick="RepairAsync">Repair connection</button>
+                    </div>
                 }
                 <div class="sender-result"><span>Sender</span><strong>@State.SenderMailbox</strong></div>
                 <details class="technical-details">
@@ -549,6 +552,8 @@
     private Task VerifyIdentityAsync() => RunOperationAsync(Setup.VerifyIdentityAsync);
 
     private Task VerifyExchangeAsync() => RunOperationAsync(Setup.VerifyExchangeAsync);
+
+    private Task VerifyActiveConnectionAsync() => RunOperationAsync(Setup.VerifyActiveConnectionAsync);
 
     private Task SendTestAsync() => RunOperationAsync(token => Setup.SendTestMessageAsync(_testRecipient, token));
 
