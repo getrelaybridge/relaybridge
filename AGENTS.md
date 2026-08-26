@@ -217,9 +217,9 @@ Avoid:
 
 ## Work Incrementally
 
-Only implement the currently requested milestone.
+Only implement the currently requested scope.
 
-Do not continue into the next milestone automatically.
+Do not advance to another milestone automatically.
 
 Before implementing:
 
@@ -232,12 +232,29 @@ Before implementing:
 After implementing:
 
 1. run relevant tests
-2. run `dotnet build`
-3. run `dotnet test`
+2. run `dotnet build -c Release`
+3. run `dotnet test -c Release`
 4. fix regressions introduced by the change
 5. update `BUILD_STATUS.md`
 
 Never claim something works unless it was actually verified where locally possible.
+
+---
+
+## Public Contribution Workflow
+
+The `main` branch is protected. Use this workflow:
+
+1. create a focused branch
+2. make the smallest coherent change
+3. commit with a Developer Certificate of Origin `Signed-off-by` trailer
+4. push the branch and let CI run
+5. open a pull request to `main`
+6. merge only after the required checks pass
+
+Do not bypass required CI or push uncontrolled changes directly to `main`.
+
+See `CONTRIBUTING.md` for the public DCO and pull-request requirements.
 
 ---
 
@@ -269,13 +286,3 @@ It must contain:
 - Known issues
 - Deferred
 - Next step
-
----
-
-## First Task
-
-If this repository is new, begin with Milestone 0 from:
-
-`docs/MASTER_SPEC.md`
-
-Do not begin SMTP implementation until Milestone 0 is complete and verified.
