@@ -30,6 +30,7 @@ using ExchangeWamConsoleLease = setup::RelayBridge.Setup.ExchangeWamConsoleLease
 using IExchangeWamConsoleNative = setup::RelayBridge.Setup.IExchangeWamConsoleNative;
 using ProvisioningScripts = setup::RelayBridge.Setup.ProvisioningScripts;
 using SetupOrchestrator = setup::RelayBridge.Setup.SetupOrchestrator;
+using SetupResultException = setup::RelayBridge.Setup.SetupResultException;
 using ToolingFileEntry = setup::RelayBridge.Setup.ToolingFileEntry;
 using ToolingIntegrityVerifier = setup::RelayBridge.Setup.ToolingIntegrityVerifier;
 using ToolingManifest = setup::RelayBridge.Setup.ToolingManifest;
@@ -1490,17 +1491,35 @@ public sealed class NativeMicrosoftSetupSecurityTests
         var line = "RELAYBRIDGE_RESULT:" + JsonSerializer.Serialize(valid);
         Assert.Equal(valid, SetupOrchestrator.ParseResult<EntraSetupResult>(new(0, line, string.Empty)));
 
-        Assert.Throws<InvalidDataException>(() =>
+        var noise = Assert.Throws<SetupResultException>(() =>
             SetupOrchestrator.ParseResult<EntraSetupResult>(new(0, "noise\n" + line, string.Empty)));
-        Assert.Throws<InvalidDataException>(() =>
+        Assert.Equal(NativeSetupFailureSubstage.ResultEnvelope, noise.FailureSubstage);
+        Assert.Equal("MalformedResultEnvelope", noise.SafeCode);
+
+        var duplicate = Assert.Throws<SetupResultException>(() =>
             SetupOrchestrator.ParseResult<EntraSetupResult>(new(0, line + "\n" + line, string.Empty)));
-        Assert.Throws<InvalidDataException>(() =>
+        Assert.Equal(NativeSetupFailureSubstage.ResultEnvelope, duplicate.FailureSubstage);
+
+        var diagnostic = Assert.Throws<SetupResultException>(() =>
             SetupOrchestrator.ParseResult<EntraSetupResult>(new(0, line, "unexpected")));
-        Assert.Throws<InvalidDataException>(() =>
+        Assert.Equal(NativeSetupFailureSubstage.ResultDiagnosticOutput, diagnostic.FailureSubstage);
+        Assert.Equal("UnexpectedDiagnosticOutput", diagnostic.SafeCode);
+
+        var token = Assert.Throws<SetupResultException>(() =>
             SetupOrchestrator.ParseResult<EntraSetupResult>(new(
                 0,
                 line[..^1] + ",\"AccessToken\":\"secret-token\"}",
                 string.Empty)));
+        Assert.Equal(NativeSetupFailureSubstage.ResultJson, token.FailureSubstage);
+        Assert.Equal("MalformedStructuredResult", token.SafeCode);
+
+        var oversized = Assert.Throws<SetupResultException>(() =>
+            SetupOrchestrator.ParseResult<EntraSetupResult>(new(
+                0,
+                "RELAYBRIDGE_RESULT:" + new string('x', NativeMicrosoftSetupProtocol.MaximumMessageBytes + 1),
+                string.Empty)));
+        Assert.Equal(NativeSetupFailureSubstage.ResultSize, oversized.FailureSubstage);
+        Assert.Equal("ResultTooLarge", oversized.SafeCode);
     }
 
     [Theory]

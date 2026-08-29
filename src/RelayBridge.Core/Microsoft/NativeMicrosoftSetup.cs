@@ -59,6 +59,17 @@ public enum NativeSetupFailureCategory
     HelperFailed,
 }
 
+public enum NativeSetupFailureSubstage
+{
+    None,
+    PublicCertificateValidation,
+    ReusableEntraValidation,
+    ResultDiagnosticOutput,
+    ResultEnvelope,
+    ResultSize,
+    ResultJson,
+}
+
 public sealed record NativeSetupSafeFailureDetails(
     string? PowerShellExceptionType,
     string? FullyQualifiedErrorId,
@@ -77,7 +88,8 @@ public sealed record NativeSetupEnvelope(
     string? SafeCorrelationId = null,
     NativeSetupSafeFailureDetails? SafeFailureDetails = null,
     EntraSetupResult? Entra = null,
-    ExchangeSetupResult? Exchange = null);
+    ExchangeSetupResult? Exchange = null,
+    NativeSetupFailureSubstage FailureSubstage = NativeSetupFailureSubstage.None);
 
 public sealed record NativeSetupStartRequest(
     int Version,
@@ -99,7 +111,8 @@ public sealed record NativeSetupStartRequest(
     Guid CandidateActivationId,
     long CandidateRevision,
     string ConfigurationFingerprint,
-    MicrosoftSetupMode SetupMode);
+    MicrosoftSetupMode SetupMode,
+    EntraSetupResult? ReusableEntraResult = null);
 
 public sealed record NativeSetupRuntimeSnapshot(
     bool Available,
@@ -110,7 +123,8 @@ public sealed record NativeSetupRuntimeSnapshot(
     string? SafeCode,
     string? SafeCorrelationId,
     DateTimeOffset UpdatedUtc,
-    NativeSetupSafeFailureDetails? SafeFailureDetails = null)
+    NativeSetupSafeFailureDetails? SafeFailureDetails = null,
+    NativeSetupFailureSubstage FailureSubstage = NativeSetupFailureSubstage.None)
 {
     [JsonIgnore]
     public bool Failed => FailureCategory != NativeSetupFailureCategory.None &&

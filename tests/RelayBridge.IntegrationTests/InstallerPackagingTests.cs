@@ -22,9 +22,9 @@ public sealed class InstallerPackagingTests
         Assert.NotNull(document.Descendants(Wix + "StandardDirectory")
             .Single(element => (string?)element.Attribute("Id") == "ProgramFiles64Folder"));
         Assert.Equal(
-            ["Host", "Setup", "Tooling"],
+            ["Docs", "Host", "Setup", "Tooling"],
             document.Descendants(Wix + "Directory")
-                .Where(element => new[] { "HOSTDIR", "SETUPDIR", "TOOLINGDIR" }
+                .Where(element => new[] { "DOCSDIR", "HOSTDIR", "SETUPDIR", "TOOLINGDIR" }
                     .Contains((string?)element.Attribute("Id"), StringComparer.Ordinal))
                 .Select(element => (string)element.Attribute("Name")!)
                 .OrderBy(value => value, StringComparer.Ordinal)
@@ -49,6 +49,97 @@ public sealed class InstallerPackagingTests
         Assert.Equal("yes", control.Attribute("Wait")?.Value);
         Assert.Empty(document.Descendants(Wix + "CustomAction"));
         Assert.DoesNotContain("Firewall", document.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Installer_owns_printer_apply_shortcut_docs_and_relaybridge_branding()
+    {
+        var package = LoadXml("installer", "Package.wxs");
+        var bundle = LoadXml("installer", "Bundle.wxs");
+        XNamespace Bal = "http://wixtoolset.org/schemas/v4/wxs/bal";
+
+        var printerProtocol = package.Descendants(Wix + "RegistryKey")
+            .Single(element => (string?)element.Attribute("Key") == "Software\\Classes\\relaybridge-printer");
+        Assert.Equal("HKLM", printerProtocol.Attribute("Root")?.Value);
+        Assert.Contains("RelayBridge.PrinterConfigurator.exe", printerProtocol.ToString(), StringComparison.Ordinal);
+        Assert.Equal("RelayBridge.ico", package.Descendants(Wix + "Property")
+            .Single(element => (string?)element.Attribute("Id") == "ARPPRODUCTICON")
+            .Attribute("Value")?.Value);
+
+        var ba = bundle.Descendants(Bal + "WixStandardBootstrapperApplication").Single();
+        Assert.EndsWith("RelayBridge.png", ba.Attribute("LogoFile")?.Value, StringComparison.Ordinal);
+        Assert.Equal("hyperlinkLargeLicense", ba.Attribute("Theme")?.Value);
+        Assert.Equal("Bundle.en-us.wxl", ba.Attribute("LocalizationFile")?.Value);
+        Assert.Contains("RelayBridge.ManagementOpener.exe", ba.Attribute("LaunchTarget")?.Value, StringComparison.Ordinal);
+        Assert.Equal("--setup", ba.Attribute("LaunchArguments")?.Value);
+        Assert.EndsWith("RelayBridge.ico", bundle.Root!.Element(Wix + "Bundle")!
+            .Attribute("IconSourceFile")?.Value, StringComparison.Ordinal);
+
+        var script = File.ReadAllText(RepositoryPath("installer", "build-installer.ps1"));
+        Assert.Contains("RelayBridge.PrinterConfigurator", script, StringComparison.Ordinal);
+        Assert.Contains("RelayBridge.ManagementOpener", script, StringComparison.Ordinal);
+        Assert.Contains("RelayBridgeDesktopShortcut", script, StringComparison.Ordinal);
+        Assert.Contains("Directory=\"DesktopFolder\"", script, StringComparison.Ordinal);
+        Assert.Contains("Icon=\"RelayBridge.ico\" Advertise=\"yes\"", script, StringComparison.Ordinal);
+        Assert.Contains("GETTING-STARTED.md", script, StringComparison.Ordinal);
+        Assert.Contains("THIRD-PARTY-NOTICES.md", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("New-NetFirewallRule", package.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Installed_getting_started_and_bundle_disclosure_are_license_accurate()
+    {
+        var gettingStarted = File.ReadAllText(RepositoryPath("docs", "release", "GETTING-STARTED.md"));
+        var localization = File.ReadAllText(RepositoryPath("installer", "Bundle.en-us.wxl"));
+        var combined = gettingStarted + localization;
+
+        var localizationDocument = XDocument.Parse(localization);
+        var strings = localizationDocument.Root!.Elements()
+            .ToDictionary(
+                element => (string)element.Attribute("Id")!,
+                element => (string)element.Attribute("Value")!,
+                StringComparer.Ordinal);
+        var requiredStringIds = new[]
+        {
+            "Caption", "Title", "CheckingForUpdatesLabel", "UpdateButton",
+            "InstallHeader", "InstallMessage", "InstallMessageOptions", "InstallVersion",
+            "ConfirmCancelMessage", "ExecuteUpgradeRelatedBundleMessage",
+            "HelpHeader", "HelpText", "HelpCloseButton",
+            "InstallLicenseLinkText", "InstallAcceptCheckbox", "InstallOptionsButton",
+            "InstallInstallButton", "InstallCancelButton",
+            "OptionsHeader", "OptionsLocationLabel", "OptionsBrowseButton", "OptionsOkButton", "OptionsCancelButton",
+            "ProgressHeader", "ProgressLabel", "OverallProgressPackageText", "ProgressCancelButton",
+            "ModifyHeader", "ModifyRepairButton", "ModifyUninstallButton", "ModifyCancelButton",
+            "SuccessHeader", "SuccessCacheHeader", "SuccessInstallHeader", "SuccessLayoutHeader",
+            "SuccessModifyHeader", "SuccessRepairHeader", "SuccessUninstallHeader", "SuccessUnsafeUninstallHeader",
+            "SuccessLaunchButton", "SuccessRestartText", "SuccessUninstallRestartText",
+            "SuccessRestartButton", "SuccessCloseButton",
+            "FailureHeader", "FailureCacheHeader", "FailureInstallHeader", "FailureLayoutHeader",
+            "FailureModifyHeader", "FailureRepairHeader", "FailureUninstallHeader", "FailureUnsafeUninstallHeader",
+            "FailureHyperlinkLogText", "FailureRestartText", "FailureRestartButton", "FailureCloseButton",
+            "FilesInUseTitle", "FilesInUseLabel", "FilesInUseNetfxCloseRadioButton",
+            "FilesInUseCloseRadioButton", "FilesInUseDontCloseRadioButton",
+            "FilesInUseRetryButton", "FilesInUseIgnoreButton", "FilesInUseExitButton"
+        };
+
+        Assert.Contains("Id=\"Caption\" Value=\"RelayBridge Setup\"", localization, StringComparison.Ordinal);
+        Assert.DoesNotContain("RelayBridge Setup Setup", localization, StringComparison.Ordinal);
+        Assert.All(requiredStringIds, id => Assert.True(strings.ContainsKey(id), $"Missing WixStdBA localization string: {id}"));
+        Assert.DoesNotContain(strings.Values, value => value.Contains("#(loc.", StringComparison.Ordinal));
+        Assert.Equal("&Install", strings["InstallInstallButton"]);
+        Assert.Equal("&Cancel", strings["InstallCancelButton"]);
+        Assert.Equal("I &accept the Microsoft Graph terms", strings["InstallAcceptCheckbox"]);
+        Assert.Contains("Mozilla Public License 2.0", combined, StringComparison.Ordinal);
+        Assert.Contains("unmodified", combined, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".NET Runtime", combined, StringComparison.Ordinal);
+        Assert.Contains("ASP.NET Core Runtime", combined, StringComparison.Ordinal);
+        Assert.Contains("PowerShell", combined, StringComparison.Ordinal);
+        Assert.Contains("ExchangeOnlineManagement", combined, StringComparison.Ordinal);
+        Assert.Contains("not bundled", combined, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("official PowerShell Gallery", combined, StringComparison.Ordinal);
+        Assert.Contains("not affiliated with or endorsed by Microsoft", combined, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("https://github.com/getrelaybridge/relaybridge", gettingStarted, StringComparison.Ordinal);
+        Assert.Contains("https://getrelaybridge.com", gettingStarted, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -142,7 +233,7 @@ public sealed class InstallerPackagingTests
         var document = LoadXml("installer", "Bundle.wxs");
         XNamespace Bal = "http://wixtoolset.org/schemas/v4/wxs/bal";
         var ba = document.Descendants(Bal + "WixStandardBootstrapperApplication").Single();
-        Assert.Equal("hyperlinkLicense", ba.Attribute("Theme")?.Value);
+        Assert.Equal("hyperlinkLargeLicense", ba.Attribute("Theme")?.Value);
         Assert.Equal("https://aka.ms/devservicesagreement", ba.Attribute("LicenseUrl")?.Value);
 
         var variable = document.Descendants(Wix + "Variable")
@@ -156,8 +247,8 @@ public sealed class InstallerPackagingTests
         var localization = File.ReadAllText(RepositoryPath("installer", "Bundle.en-us.wxl"));
         Assert.Contains("Microsoft.Graph.Authentication 2.25.0", localization, StringComparison.Ordinal);
         Assert.Contains("Microsoft.Graph.Applications 2.25.0", localization, StringComparison.Ordinal);
-        Assert.Contains("I have reviewed and accept", localization, StringComparison.Ordinal);
-        Assert.Contains("View Microsoft license terms", localization, StringComparison.Ordinal);
+        Assert.Contains("I &amp;accept the Microsoft Graph terms", localization, StringComparison.Ordinal);
+        Assert.Contains("View the Microsoft Graph", localization, StringComparison.Ordinal);
     }
 
     [Fact]

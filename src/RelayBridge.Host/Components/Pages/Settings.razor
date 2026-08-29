@@ -3,6 +3,7 @@
 @page "/settings"
 @rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
 @using Microsoft.Extensions.Options
+@using RelayBridge.Host.Services
 @using RelayBridge.Infrastructure.Queue
 @using RelayBridge.Infrastructure.Smtp
 @inject IWebHostEnvironment HostEnvironment
@@ -10,6 +11,7 @@
 @inject IOptions<SmtpListenerOptions> Listener
 @inject IOptions<QueueOptions> Queue
 @inject DeviceEndpointAdvisor Endpoints
+@inject PrinterConnectivityApplyCoordinator PrinterApply
 
 <PageTitle>Settings · RelayBridge</PageTitle>
 
@@ -66,12 +68,13 @@
             {
                 <div class="warning-panel" role="status">
                     <strong>NOT YET APPLIED</strong>
-                    <p>RelayBridge has generated the configuration only. Download or copy it, place it at the exact destination below from an elevated PowerShell window, and restart the service.</p>
+                    <p>RelayBridge has generated the configuration only. Review it, then apply this exact configuration through Windows administrator confirmation.</p>
                 </div>
                 <h3>Generated printer-connectivity configuration</h3>
                 <pre class="configuration-example"><code>@ConfigurationExample</code></pre>
                 <div class="actions">
-                    <button class="button primary" @onclick="DownloadConfigurationAsync">Download configuration</button>
+                    <button class="button primary" @onclick="ApplyConfigurationAsync" disabled="@_applying">@(_applying ? "Waiting for administrator confirmation…" : "Apply printer connectivity")</button>
+                    <button class="button secondary" @onclick="DownloadConfigurationAsync">Download configuration</button>
                     <button class="button secondary" @onclick="CopyConfigurationAsync">Copy configuration</button>
                 </div>
                 @if (!string.IsNullOrWhiteSpace(_notice))
@@ -83,9 +86,11 @@
                     <div><dt>Queue processing after restart</dt><dd>Enabled</dd></div>
                     <div><dt>Changes currently applied</dt><dd>No</dd></div>
                 </dl>
-                <h3>Apply from elevated PowerShell</h3>
-                <p class="guidance">Run PowerShell as Administrator. If your browser saved the download elsewhere, adjust only the first command's source path.</p>
-                <pre class="configuration-example"><code>@AdministratorCommands</code></pre>
+                <details class="technical-details">
+                    <summary>Advanced manual apply</summary>
+                    <p class="guidance">If Windows administrator confirmation cannot start, run PowerShell as Administrator. If your browser saved the download elsewhere, adjust only the first command's source path.</p>
+                    <pre class="configuration-example"><code>@AdministratorCommands</code></pre>
+                </details>
                 <h3>Windows Firewall</h3>
                 <p class="guidance">The installer intentionally does not create a firewall rule. If Windows Firewall blocks the printer, run this command manually as Administrator. It is limited to the RelayBridge Host executable, the selected local address and port, the Private profile, and the local subnet. Replace <code>LocalSubnet</code> with the printer's exact IP address or a narrower trusted subnet when appropriate.</p>
                 <pre class="configuration-example"><code>@FirewallCommand</code></pre>
@@ -142,6 +147,7 @@
     private DeviceEndpointAdvice Advice = null!;
     private string? _selectedAddress;
     private string? _notice;
+    private bool _applying;
     protected override void OnInitialized()
     {
         Advice = Endpoints.GetAdvice();
@@ -169,6 +175,24 @@
     {
         await JavaScript.InvokeVoidAsync("relayBridge.downloadText", DownloadFileName, ConfigurationExample);
         _notice = $"Downloaded {DownloadFileName}. The configuration is still not applied.";
+    }
+    private async Task ApplyConfigurationAsync()
+    {
+        if (_applying || _selectedAddress is null)
+        {
+            return;
+        }
+
+        _applying = true;
+        var preparation = PrinterApply.Prepare(_selectedAddress);
+        _notice = preparation.Message;
+        if (!preparation.Succeeded || preparation.LaunchUri is null)
+        {
+            _applying = false;
+            return;
+        }
+
+        await JavaScript.InvokeVoidAsync("relayBridge.launchPrinterApply", preparation.LaunchUri);
     }
     private async Task CopyConfigurationAsync()
     {

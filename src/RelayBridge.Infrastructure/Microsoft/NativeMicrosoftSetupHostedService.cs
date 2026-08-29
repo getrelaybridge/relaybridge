@@ -290,7 +290,8 @@ public sealed partial class NativeMicrosoftSetupServer : IAsyncDisposable
             candidate.ActivationId,
             candidate.Revision,
             candidate.ConfigurationFingerprint,
-            candidate.Mode);
+            candidate.Mode,
+            MicrosoftSetupService.GetReusableNativeEntraResult(state));
         await WriteAsync(pipe, start, bootstrapToken).ConfigureAwait(false);
         bootstrapCancellation.CancelAfter(Timeout.InfiniteTimeSpan);
 
@@ -352,7 +353,9 @@ public sealed partial class NativeMicrosoftSetupServer : IAsyncDisposable
                         "Microsoft setup was cancelled. No active RelayBridge configuration was changed.",
                         message.SafeCode,
                         message.SafeCorrelationId,
-                        message.SafeFailureDetails);
+                        message.SafeFailureDetails,
+                        message.Stage,
+                        message.FailureSubstage);
                     return;
                 case NativeSetupMessageKind.Failed:
                     _runtime.Fail(
@@ -360,7 +363,9 @@ public sealed partial class NativeMicrosoftSetupServer : IAsyncDisposable
                         FailureMessage(message.FailureCategory, message.SafeCode, protocolState.EntraApplied),
                         message.SafeCode,
                         message.SafeCorrelationId,
-                        message.SafeFailureDetails);
+                        message.SafeFailureDetails,
+                        message.Stage,
+                        message.FailureSubstage);
                     return;
                 default:
                     throw new InvalidDataException("The helper setup message arrived out of order.");

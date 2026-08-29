@@ -41,6 +41,8 @@ internal sealed class FakeExchangeScenario
 
     public string AuthResult { get; set; } = "235 2.7.0 Authentication successful";
 
+    public IReadOnlyList<string>? AuthResults { get; set; }
+
     public string MailResult { get; set; } = "250 2.1.0 Sender accepted";
 
     public IReadOnlyList<string> RecipientResults { get; set; } = ["250 2.1.5 Recipient accepted"];
@@ -104,6 +106,8 @@ internal sealed class FakeExchangeSmtpServer : IAsyncDisposable
 
     public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
 
+    public int ConnectionCount { get; private set; }
+
     public void Start()
     {
         _listener.Start();
@@ -141,162 +145,175 @@ internal sealed class FakeExchangeSmtpServer : IAsyncDisposable
 
     private async Task RunAsync(CancellationToken cancellationToken)
     {
-        try
+        while (!cancellationToken.IsCancellationRequested)
         {
-            using var client = await _listener.AcceptTcpClientAsync(cancellationToken);
-            Stream stream = client.GetStream();
-            if (_scenario.Disconnect == FakeExchangeDisconnect.BeforeGreeting)
+            try
             {
-                return;
-            }
+                using var client = await _listener.AcceptTcpClientAsync(cancellationToken);
+                var connectionIndex = ConnectionCount++;
+                var authResult = _scenario.AuthResults is { Count: > 0 } authResults
+                    ? authResults[Math.Min(connectionIndex, authResults.Count - 1)]
+                    : _scenario.AuthResult;
+                Stream stream = client.GetStream();
+                if (_scenario.Disconnect == FakeExchangeDisconnect.BeforeGreeting)
+                {
+                    continue;
+                }
 
-            await WriteLineAsync(stream, _scenario.Greeting, cancellationToken);
-            AddCommand(await ReadLineAsync(stream, cancellationToken));
-            await WriteLinesAsync(stream, _scenario.PreTlsEhlo, cancellationToken);
-            if (_scenario.Disconnect == FakeExchangeDisconnect.AfterEhlo)
-            {
-                return;
-            }
+                await WriteLineAsync(stream, _scenario.Greeting, cancellationToken);
+                AddCommand(await ReadLineAsync(stream, cancellationToken));
+                await WriteLinesAsync(stream, _scenario.PreTlsEhlo, cancellationToken);
+                if (_scenario.Disconnect == FakeExchangeDisconnect.AfterEhlo)
+                {
+                    continue;
+                }
 
-            var startTls = await ReadLineAsync(stream, cancellationToken);
-            AddCommand(startTls);
-            if (!string.Equals(startTls, "STARTTLS", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
+                var startTls = await ReadLineAsync(stream, cancellationToken);
+                AddCommand(startTls);
+                if (!string.Equals(startTls, "STARTTLS", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
 
-            await WriteLineAsync(stream, _scenario.StartTls, cancellationToken);
-            if (!StartsWithCode(_scenario.StartTls, 220) || _scenario.Disconnect == FakeExchangeDisconnect.DuringTls)
-            {
-                return;
-            }
+                await WriteLineAsync(stream, _scenario.StartTls, cancellationToken);
+                if (!StartsWithCode(_scenario.StartTls, 220) || _scenario.Disconnect == FakeExchangeDisconnect.DuringTls)
+                {
+                    continue;
+                }
 
-            var sslStream = new SslStream(stream, leaveInnerStreamOpen: false);
-            await sslStream.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
-            {
-                ServerCertificate = _certificate,
-                ClientCertificateRequired = false,
-                EnabledSslProtocols = System.Security.Authentication.SslProtocols.None,
-            }, cancellationToken);
-            stream = sslStream;
+                var sslStream = new SslStream(stream, leaveInnerStreamOpen: false);
+                await sslStream.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
+                {
+                    ServerCertificate = _certificate,
+                    ClientCertificateRequired = false,
+                    EnabledSslProtocols = System.Security.Authentication.SslProtocols.None,
+                }, cancellationToken);
+                stream = sslStream;
 
-            AddCommand(await ReadLineAsync(stream, cancellationToken));
-            await WriteLinesAsync(stream, _scenario.PostTlsEhlo, cancellationToken);
-            var auth = await ReadLineAsync(stream, cancellationToken);
-            AddCommand(auth.StartsWith("AUTH XOAUTH2", StringComparison.OrdinalIgnoreCase)
-                ? "AUTH XOAUTH2 [REDACTED]"
-                : auth);
-            if (!auth.StartsWith("AUTH XOAUTH2", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
+                AddCommand(await ReadLineAsync(stream, cancellationToken));
+                await WriteLinesAsync(stream, _scenario.PostTlsEhlo, cancellationToken);
+                var auth = await ReadLineAsync(stream, cancellationToken);
+                AddCommand(auth.StartsWith("AUTH XOAUTH2", StringComparison.OrdinalIgnoreCase)
+                    ? "AUTH XOAUTH2 [REDACTED]"
+                    : auth);
+                if (!auth.StartsWith("AUTH XOAUTH2", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
 
-            await WriteLineAsync(stream, _scenario.AuthChallenge, cancellationToken);
-            if (StartsWithCode(_scenario.AuthChallenge, 334))
-            {
-                var encoded = await ReadLineAsync(stream, cancellationToken);
-                AuthenticationPayload = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
-                await WriteLineAsync(stream, _scenario.AuthResult, cancellationToken);
-            }
+                await WriteLineAsync(stream, _scenario.AuthChallenge, cancellationToken);
+                if (StartsWithCode(_scenario.AuthChallenge, 334))
+                {
+                    var encoded = await ReadLineAsync(stream, cancellationToken);
+                    AuthenticationPayload = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
+                    await WriteLineAsync(stream, authResult, cancellationToken);
+                }
 
-            if (!StartsWithCode(_scenario.AuthResult, 235) || _scenario.Disconnect == FakeExchangeDisconnect.AfterAuth)
-            {
-                return;
-            }
+                if (!StartsWithCode(authResult, 235) || _scenario.Disconnect == FakeExchangeDisconnect.AfterAuth)
+                {
+                    continue;
+                }
 
-            MailCommand = await ReadLineAsync(stream, cancellationToken);
+                MailCommand = await ReadLineAsync(stream, cancellationToken);
             AddCommand(MailCommand);
-            if (string.Equals(MailCommand, "QUIT", StringComparison.OrdinalIgnoreCase))
-            {
-                QuitReceived = true;
-                MailCommand = null;
-                await WriteLineAsync(stream, "221 2.0.0 Bye", cancellationToken);
-                return;
-            }
+                if (string.Equals(MailCommand, "QUIT", StringComparison.OrdinalIgnoreCase))
+                {
+                    QuitReceived = true;
+                    MailCommand = null;
+                    await WriteLineAsync(stream, "221 2.0.0 Bye", cancellationToken);
+                    continue;
+                }
 
-            await WriteLineAsync(stream, _scenario.MailResult, cancellationToken);
-            if (!IsPositiveCompletion(_scenario.MailResult) || _scenario.Disconnect == FakeExchangeDisconnect.AfterMail)
-            {
-                return;
-            }
+                await WriteLineAsync(stream, _scenario.MailResult, cancellationToken);
+                if (!IsPositiveCompletion(_scenario.MailResult) || _scenario.Disconnect == FakeExchangeDisconnect.AfterMail)
+                {
+                    continue;
+                }
 
-            var recipientRejected = false;
-            for (var index = 0; index < _scenario.RecipientResults.Count; index++)
+                var recipientRejected = false;
+                for (var index = 0; index < _scenario.RecipientResults.Count; index++)
+                {
+                    var recipient = await ReadLineAsync(stream, cancellationToken);
+                    AddCommand(recipient);
+                    await WriteLineAsync(stream, _scenario.RecipientResults[index], cancellationToken);
+                    recipientRejected |= !IsPositiveCompletion(_scenario.RecipientResults[index]);
+                    if (_scenario.Disconnect == FakeExchangeDisconnect.DuringRecipient)
+                    {
+                        return;
+                    }
+                }
+
+                var next = await ReadLineAsync(stream, cancellationToken);
+                AddCommand(next);
+                if (recipientRejected)
+                {
+                    RsetReceived = string.Equals(next, "RSET", StringComparison.OrdinalIgnoreCase);
+                    if (RsetReceived)
+                    {
+                        await WriteLineAsync(stream, "250 2.0.0 Reset", cancellationToken);
+                    }
+
+                    continue;
+                }
+
+                DataCommandReceived = string.Equals(next, "DATA", StringComparison.OrdinalIgnoreCase);
+                await WriteLineAsync(stream, _scenario.DataResult, cancellationToken);
+                if (!StartsWithCode(_scenario.DataResult, 354))
+                {
+                    continue;
+                }
+
+                if (_scenario.Disconnect == FakeExchangeDisconnect.DuringData)
+                {
+                    var buffer = new byte[1024];
+                    _ = await stream.ReadAsync(buffer, cancellationToken);
+                    continue;
+                }
+
+                await ReadDataAsync(stream, cancellationToken);
+                DataReceivedSignal.TrySetResult();
+                if (_scenario.Disconnect == FakeExchangeDisconnect.AfterDataTerminator)
+                {
+                    continue;
+                }
+
+                if (_scenario.FinalResponseDelay > TimeSpan.Zero)
+                {
+                    await Task.Delay(_scenario.FinalResponseDelay, cancellationToken);
+                }
+
+                if (_scenario.FinalResponseRelease is not null)
+                {
+                    await _scenario.FinalResponseRelease.WaitAsync(cancellationToken);
+                }
+
+                await WriteLineAsync(stream, _scenario.FinalResult, cancellationToken);
+                if (_scenario.Disconnect == FakeExchangeDisconnect.AfterFinalResponse ||
+                    !StartsWithCode(_scenario.FinalResult, 250))
+                {
+                    continue;
+                }
+
+                var quit = await ReadLineAsync(stream, cancellationToken);
+                AddCommand(quit);
+                QuitReceived = string.Equals(quit, "QUIT", StringComparison.OrdinalIgnoreCase);
+                if (QuitReceived)
+                {
+                    await WriteLineAsync(stream, "221 2.0.0 Bye", cancellationToken);
+                }
+            }
+            catch (Exception exception) when (
+                exception is OperationCanceledException or IOException or SocketException or AuthenticationException or FormatException)
             {
-                var recipient = await ReadLineAsync(stream, cancellationToken);
-                AddCommand(recipient);
-                await WriteLineAsync(stream, _scenario.RecipientResults[index], cancellationToken);
-                recipientRejected |= !IsPositiveCompletion(_scenario.RecipientResults[index]);
-                if (_scenario.Disconnect == FakeExchangeDisconnect.DuringRecipient)
+                if (cancellationToken.IsCancellationRequested)
                 {
                     return;
                 }
-            }
 
-            var next = await ReadLineAsync(stream, cancellationToken);
-            AddCommand(next);
-            if (recipientRejected)
-            {
-                RsetReceived = string.Equals(next, "RSET", StringComparison.OrdinalIgnoreCase);
-                if (RsetReceived)
-                {
-                    await WriteLineAsync(stream, "250 2.0.0 Reset", cancellationToken);
-                }
-
+                Fault = exception;
+                DataReceivedSignal.TrySetCanceled(cancellationToken);
                 return;
             }
-
-            DataCommandReceived = string.Equals(next, "DATA", StringComparison.OrdinalIgnoreCase);
-            await WriteLineAsync(stream, _scenario.DataResult, cancellationToken);
-            if (!StartsWithCode(_scenario.DataResult, 354))
-            {
-                return;
-            }
-
-            if (_scenario.Disconnect == FakeExchangeDisconnect.DuringData)
-            {
-                var buffer = new byte[1024];
-                _ = await stream.ReadAsync(buffer, cancellationToken);
-                return;
-            }
-
-            await ReadDataAsync(stream, cancellationToken);
-            DataReceivedSignal.TrySetResult();
-            if (_scenario.Disconnect == FakeExchangeDisconnect.AfterDataTerminator)
-            {
-                return;
-            }
-
-            if (_scenario.FinalResponseDelay > TimeSpan.Zero)
-            {
-                await Task.Delay(_scenario.FinalResponseDelay, cancellationToken);
-            }
-
-            if (_scenario.FinalResponseRelease is not null)
-            {
-                await _scenario.FinalResponseRelease.WaitAsync(cancellationToken);
-            }
-
-            await WriteLineAsync(stream, _scenario.FinalResult, cancellationToken);
-            if (_scenario.Disconnect == FakeExchangeDisconnect.AfterFinalResponse ||
-                !StartsWithCode(_scenario.FinalResult, 250))
-            {
-                return;
-            }
-
-            var quit = await ReadLineAsync(stream, cancellationToken);
-            AddCommand(quit);
-            QuitReceived = string.Equals(quit, "QUIT", StringComparison.OrdinalIgnoreCase);
-            if (QuitReceived)
-            {
-                await WriteLineAsync(stream, "221 2.0.0 Bye", cancellationToken);
-            }
-        }
-        catch (Exception exception) when (
-            exception is OperationCanceledException or IOException or SocketException or AuthenticationException or FormatException)
-        {
-            Fault = exception;
-            DataReceivedSignal.TrySetCanceled(cancellationToken);
         }
     }
 

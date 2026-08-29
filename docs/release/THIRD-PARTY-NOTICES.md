@@ -7,6 +7,12 @@ RelayBridge-owned source is licensed under MPL-2.0. Nothing in that license chan
 or ownership of the third-party components below. Third-party source and binaries remain under
 their own terms.
 
+The RelayBridge visual mark used by the Windows installer is project-owned material imported from
+the separately MIT-licensed RelayBridge website repository at public commit
+`0c47c2b88cada345ebad06b7d26b08d2a6dcb9ac`. Its provenance is recorded in
+`installer/branding/README.md`. This does not change the MPL-2.0 license of RelayBridge application
+source or the licenses of the third-party components below.
+
 ## A. Components redistributed by RelayBridge
 
 | Component | Version | License / role |

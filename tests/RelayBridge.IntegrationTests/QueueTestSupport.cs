@@ -19,6 +19,7 @@ internal sealed class QueueTestContext : IAsyncDisposable
         QueueOptions options,
         QueueCapacityManager capacity,
         QueueWorkSignal workSignal,
+        QueueDeliveryActivation deliveryActivation,
         DurableMessageStore messageStore,
         ManualTimeProvider timeProvider,
         Guid deviceId)
@@ -29,6 +30,7 @@ internal sealed class QueueTestContext : IAsyncDisposable
         Options = options;
         Capacity = capacity;
         WorkSignal = workSignal;
+        DeliveryActivation = deliveryActivation;
         MessageStore = messageStore;
         TimeProvider = timeProvider;
         DeviceId = deviceId;
@@ -45,6 +47,8 @@ internal sealed class QueueTestContext : IAsyncDisposable
     public QueueCapacityManager Capacity { get; }
 
     public QueueWorkSignal WorkSignal { get; }
+
+    public QueueDeliveryActivation DeliveryActivation { get; }
 
     public DurableMessageStore MessageStore { get; }
 
@@ -84,6 +88,8 @@ internal sealed class QueueTestContext : IAsyncDisposable
         fileSystem ??= new PhysicalSpoolFileSystem();
         var capacity = new QueueCapacityManager(database, fileSystem, options);
         var signal = new QueueWorkSignal();
+        var deliveryActivation = new QueueDeliveryActivation();
+        deliveryActivation.Activate();
         var store = new DurableMessageStore(database, fileSystem, capacity, signal);
         var timeProvider = new ManualTimeProvider(
             new DateTimeOffset(2026, 8, 22, 10, 0, 0, TimeSpan.Zero));
@@ -94,6 +100,7 @@ internal sealed class QueueTestContext : IAsyncDisposable
             options,
             capacity,
             signal,
+            deliveryActivation,
             store,
             timeProvider,
             device.Id);
@@ -107,6 +114,7 @@ internal sealed class QueueTestContext : IAsyncDisposable
             provider,
             Options,
             WorkSignal,
+            DeliveryActivation,
             TimeProvider,
             NullLogger<QueueWorker>.Instance);
     }

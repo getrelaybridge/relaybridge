@@ -6,4 +6,5 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("RelayBridge.Setup")]
 [assembly: InternalsVisibleTo("RelayBridge.SetupLauncher")]
 [assembly: InternalsVisibleTo("RelayBridge.ToolingProvisioner")]
+[assembly: InternalsVisibleTo("RelayBridge.PrinterConfigurator")]
 [assembly: InternalsVisibleTo("RelayBridge.IntegrationTests")]

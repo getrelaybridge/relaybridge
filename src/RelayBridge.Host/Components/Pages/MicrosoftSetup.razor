@@ -39,11 +39,20 @@
             <div class="notice @(_noticeIsError ? "error" : "success")" role="@(_noticeIsError ? "alert" : "status")">
                 @_notice
                 @if (!string.IsNullOrWhiteSpace(_technicalCode) || !string.IsNullOrWhiteSpace(_correlationId) ||
+                    _technicalStage is not null || _technicalSubstage != NativeSetupFailureSubstage.None ||
                     _safeFailureDetails is not null)
                 {
                     <details>
                         <summary>Technical details</summary>
                         <dl class="technical-result">
+                            @if (_technicalStage is not null)
+                            {
+                                <div><dt>Stage</dt><dd><code>@_technicalStage</code></dd></div>
+                            }
+                            @if (_technicalSubstage != NativeSetupFailureSubstage.None)
+                            {
+                                <div><dt>Substage</dt><dd><code>@_technicalSubstage</code></dd></div>
+                            }
                             @if (!string.IsNullOrWhiteSpace(_technicalCode))
                             {
                                 <div><dt>Category / response</dt><dd><code>@_technicalCode</code></dd></div>
@@ -297,6 +306,7 @@
                 <p class="eyebrow">Step 5</p>
                 <h1>Test Exchange Online</h1>
                 <p class="lead">RelayBridge will use the proven production SMTP OAuth provider and send a small verification message to the selected sender mailbox.</p>
+                <p class="guidance">If Exchange initially rejects application authentication after recent permission changes, RelayBridge will retry authentication briefly; this does not assume propagation is the cause.</p>
                 @StatusRows(("Microsoft identity", State.IdentityValidated), ("Exchange SMTP", false), ("Sender authorization", false))
                 <div class="actions">
                     <button class="button primary" disabled="@_busy" @onclick="VerifyExchangeAsync">Test secure connection</button>
@@ -394,6 +404,8 @@
     private string _exchangeScript = string.Empty;
     private string? _notice;
     private string? _technicalCode;
+    private NativeSetupStage? _technicalStage;
+    private NativeSetupFailureSubstage _technicalSubstage;
     private string? _correlationId;
     private DateTimeOffset? _technicalTimestamp;
     private NativeSetupSafeFailureDetails? _safeFailureDetails;
@@ -507,6 +519,8 @@
                         _notice = snapshot.Message;
                         _noticeIsError = snapshot.Failed;
                         _technicalCode = snapshot.SafeCode;
+                        _technicalStage = snapshot.Stage;
+                        _technicalSubstage = snapshot.FailureSubstage;
                         _correlationId = snapshot.SafeCorrelationId;
                         _safeFailureDetails = snapshot.SafeFailureDetails;
                         _technicalTimestamp = snapshot.UpdatedUtc;
@@ -620,6 +634,8 @@
         _busy = true;
         _notice = null;
         _technicalCode = null;
+        _technicalStage = null;
+        _technicalSubstage = NativeSetupFailureSubstage.None;
         _correlationId = null;
         _safeFailureDetails = null;
         _technicalTimestamp = null;

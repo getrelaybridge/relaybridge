@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using RelayBridge.Core.Microsoft;
 using RelayBridge.Core.Queue;
+using RelayBridge.Infrastructure.Queue;
 using RelayBridge.Infrastructure.Storage;
 
 namespace RelayBridge.Infrastructure.Microsoft;
@@ -46,8 +47,10 @@ public sealed class MicrosoftSetupService
     private readonly MicrosoftTokenProvider _tokens;
     private readonly MicrosoftAuthenticationTester _identityTester;
     private readonly ExchangeDeliveryTester _exchangeTester;
+    private readonly QueueDeliveryActivation _queueDeliveryActivation;
     private readonly TimeProvider _timeProvider;
     private readonly MicrosoftSetupPersistenceHooks? _persistenceHooks;
+    private readonly IReadOnlyList<TimeSpan> _smtpPropagationRetryDelays;
 
     public MicrosoftSetupService(
         RelayDatabase database,
@@ -55,8 +58,18 @@ public sealed class MicrosoftSetupService
         MicrosoftTokenProvider tokens,
         MicrosoftAuthenticationTester identityTester,
         ExchangeDeliveryTester exchangeTester,
+        QueueDeliveryActivation queueDeliveryActivation,
         TimeProvider timeProvider)
-        : this(database, certificates, tokens, identityTester, exchangeTester, timeProvider, persistenceHooks: null)
+        : this(
+            database,
+            certificates,
+            tokens,
+            identityTester,
+            exchangeTester,
+            queueDeliveryActivation,
+            timeProvider,
+            persistenceHooks: null,
+            smtpPropagationRetryDelays: null)
     {
     }
 
@@ -66,16 +79,21 @@ public sealed class MicrosoftSetupService
         MicrosoftTokenProvider tokens,
         MicrosoftAuthenticationTester identityTester,
         ExchangeDeliveryTester exchangeTester,
+        QueueDeliveryActivation queueDeliveryActivation,
         TimeProvider timeProvider,
-        MicrosoftSetupPersistenceHooks? persistenceHooks)
+        MicrosoftSetupPersistenceHooks? persistenceHooks,
+        IReadOnlyList<TimeSpan>? smtpPropagationRetryDelays = null)
     {
         _database = database;
         _certificates = certificates;
         _tokens = tokens;
         _identityTester = identityTester;
         _exchangeTester = exchangeTester;
+        _queueDeliveryActivation = queueDeliveryActivation;
         _timeProvider = timeProvider;
         _persistenceHooks = persistenceHooks;
+        _smtpPropagationRetryDelays = smtpPropagationRetryDelays ??
+            [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)];
     }
 
     public MicrosoftSetupState GetState(CancellationToken cancellationToken = default)
@@ -97,6 +115,32 @@ public sealed class MicrosoftSetupService
         }
 
         return CreateNativeCandidateIdentity(state);
+    }
+
+    internal static EntraSetupResult? GetReusableNativeEntraResult(MicrosoftSetupState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        if (state.Lifecycle != MicrosoftSetupCandidateLifecycle.Active ||
+            state.Mode != MicrosoftSetupMode.NewApplication ||
+            !state.EntraResultValidated ||
+            state.Step < MicrosoftSetupStep.ExchangePermission ||
+            state.ActivationId is null || state.ActivationId == Guid.Empty ||
+            state.Certificate is null ||
+            state.TenantId is null || state.TenantId == Guid.Empty ||
+            state.ClientId is null || state.ClientId == Guid.Empty ||
+            state.ServicePrincipalObjectId is null || state.ServicePrincipalObjectId == Guid.Empty ||
+            string.IsNullOrWhiteSpace(state.SenderMailbox))
+        {
+            return null;
+        }
+
+        _ = MicrosoftSetupCandidateFingerprint.Create(state);
+        _ = MicrosoftSetupValidation.ValidateMailbox(state.SenderMailbox);
+        return new EntraSetupResult(
+            state.TenantId.Value,
+            state.ClientId.Value,
+            state.ServicePrincipalObjectId.Value,
+            ApiPermissionEntryCount: 0);
     }
 
     public NativeMicrosoftCandidateIdentity ApplyNativeEntraResult(
@@ -204,18 +248,22 @@ public sealed class MicrosoftSetupService
         var runtimeEvidenceKey = MicrosoftConfigurationFingerprint.CreateRuntimeEvidenceKey(
             expected.ActivationId,
             finalFingerprint);
-        var result = await _exchangeTester.TestAsync(
-            expected.SenderMailbox,
-            expected.SenderMailbox,
-            new CandidateTokenProvider(_tokens, configuration),
-            configuration,
-            runtimeEvidenceKey,
+        var verification = await VerifySetupSmtpWithBoundedPropagationRetryAsync(
+            token => _exchangeTester.TestAsync(
+                expected.SenderMailbox,
+                expected.SenderMailbox,
+                new CandidateTokenProvider(_tokens, configuration),
+                configuration,
+                runtimeEvidenceKey,
+                token),
+            allowPropagationRetry: true,
             cancellationToken).ConfigureAwait(false);
+        var result = verification.Result;
         if (result.Outcome != DeliveryOutcome.Success)
         {
             return Failure(
                 identityState,
-                PlainExchangeMessage(result.ErrorCategory),
+                PlainExchangeMessage(result.ErrorCategory, verification.AttemptCount > 1),
                 ExchangeTechnicalCode(result),
                 result.CorrelationId.ToString("D"));
         }
@@ -235,6 +283,7 @@ public sealed class MicrosoftSetupService
             evidence,
             _timeProvider.GetUtcNow(),
             cancellationToken);
+        _queueDeliveryActivation.Activate();
         _persistenceHooks?.AfterActivationCommit?.Invoke();
         return new MicrosoftSetupOperationResult(
             true,
@@ -560,18 +609,22 @@ public sealed class MicrosoftSetupService
             MicrosoftConfigurationFingerprint.Create(
             configuration,
             state.SenderMailbox));
-        var result = await _exchangeTester.TestAsync(
-            state.SenderMailbox!,
-            state.SenderMailbox!,
-            candidateTokenProvider,
-            configuration,
-            configurationFingerprint,
+        var verification = await VerifySetupSmtpWithBoundedPropagationRetryAsync(
+            token => _exchangeTester.TestAsync(
+                state.SenderMailbox!,
+                state.SenderMailbox!,
+                candidateTokenProvider,
+                configuration,
+                configurationFingerprint,
+                token),
+            state.ExchangeResultValidated,
             cancellationToken).ConfigureAwait(false);
+        var result = verification.Result;
         if (result.Outcome != DeliveryOutcome.Success)
         {
             return Failure(
                 state,
-                PlainExchangeMessage(result.ErrorCategory),
+                PlainExchangeMessage(result.ErrorCategory, verification.AttemptCount > 1),
                 ExchangeTechnicalCode(result),
                 result.CorrelationId.ToString("D"));
         }
@@ -589,9 +642,12 @@ public sealed class MicrosoftSetupService
             state.SenderMailbox!,
             state,
             cancellationToken);
+        _queueDeliveryActivation.Activate();
         return new MicrosoftSetupOperationResult(
             true,
-            "Exchange accepted a verification message from the scoped sender. The candidate configuration is now active.",
+            verification.AttemptCount > 1
+                ? "Exchange accepted a verification message after a brief bounded authorization retry. The candidate configuration is now active."
+                : "Exchange accepted a verification message from the scoped sender. The candidate configuration is now active.",
             state);
     }
 
@@ -845,12 +901,52 @@ public sealed class MicrosoftSetupService
         return new MicrosoftSetupOperationResult(false, message, state, technicalCode, correlationId);
     }
 
-    private static string PlainExchangeMessage(string? category)
+    internal async Task<SetupSmtpVerificationResult> VerifySetupSmtpWithBoundedPropagationRetryAsync(
+        Func<CancellationToken, Task<ExchangeDeliveryDiagnosticResult>> attempt,
+        bool allowPropagationRetry,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(attempt);
+        var result = await attempt(cancellationToken).ConfigureAwait(false);
+        var attemptCount = 1;
+        if (!allowPropagationRetry)
+        {
+            return new SetupSmtpVerificationResult(result, attemptCount);
+        }
+
+        foreach (var delay in _smtpPropagationRetryDelays)
+        {
+            if (!IsPossibleExchangeAuthorizationPropagation(result))
+            {
+                break;
+            }
+
+            await Task.Delay(delay, _timeProvider, cancellationToken).ConfigureAwait(false);
+            result = await attempt(cancellationToken).ConfigureAwait(false);
+            attemptCount++;
+        }
+
+        return new SetupSmtpVerificationResult(result, attemptCount);
+    }
+
+    internal static bool IsPossibleExchangeAuthorizationPropagation(ExchangeDeliveryDiagnosticResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return string.Equals(
+                result.ErrorCategory,
+                ExchangeSmtpErrorCategories.Authentication,
+                StringComparison.Ordinal) &&
+            result.Checkpoints.AuthenticationResponseCode == 535;
+    }
+
+    private static string PlainExchangeMessage(string? category, bool retriedBriefly = false)
     {
         return category switch
         {
             "Authentication" =>
-                "Microsoft authentication succeeded earlier, but Exchange SMTP authentication is unavailable. If Microsoft setup was just completed, Exchange authorization changes may still be propagating; wait briefly and retry. If the problem persists, check tenant and mailbox SMTP AUTH settings.",
+                retriedBriefly
+                    ? "Exchange Online has not accepted the application authentication yet. Recent permission changes can take time to become effective, but propagation is not certain. RelayBridge retried briefly. If the problem persists, check tenant and mailbox SMTP AUTH settings."
+                    : "Microsoft authentication succeeded earlier, but Exchange SMTP authentication is unavailable. If Microsoft setup was just completed, Exchange authorization changes may still be propagating; wait briefly and retry. If the problem persists, check tenant and mailbox SMTP AUTH settings.",
             "Authorization" or "SenderRejected" =>
                 "RelayBridge connected to Exchange, but the sender mailbox is not authorized. Check the Exchange permission step.",
             "Tls" =>
@@ -967,6 +1063,10 @@ public sealed class MicrosoftSetupService
         string Role,
         bool SenderInScope);
 }
+
+internal sealed record SetupSmtpVerificationResult(
+    ExchangeDeliveryDiagnosticResult Result,
+    int AttemptCount);
 
 internal sealed class MicrosoftSetupPersistenceHooks
 {

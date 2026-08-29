@@ -21,6 +21,7 @@
     <Property Id="ARPCONTACT" Value="RelayBridge Project" />
     <Property Id="ARPURLINFOABOUT" Value="https://getrelaybridge.com" />
     <Property Id="ARPHELPLINK" Value="https://getrelaybridge.com" />
+    <Property Id="ARPPRODUCTICON" Value="RelayBridge.ico" />
     <Property Id="ARPNOMODIFY" Value="1" />
     <Property Id="RELAYBRIDGE_EXTERNAL_TOOLING_TRANSACTION" Secure="yes" />
     <Property Id="RELAYBRIDGE_EXTERNAL_TOOLING_IDENTITY">
@@ -55,8 +56,12 @@
         <Directory Id="HOSTDIR" Name="Host" />
         <Directory Id="SETUPDIR" Name="Setup" />
         <Directory Id="TOOLINGDIR" Name="Tooling" />
+        <Directory Id="DOCSDIR" Name="Docs" />
       </Directory>
     </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+
+    <Icon Id="RelayBridge.ico" SourceFile="$(var.BrandingRoot)\RelayBridge.ico" />
 
     <StandardDirectory Id="CommonAppDataFolder">
       <Directory Id="PROGRAMDATAROOT" Name="RelayBridge">
@@ -145,6 +150,31 @@
           </RegistryKey>
         </RegistryKey>
       </Component>
+      <Component Id="RelayBridgePrinterProtocolComponent"
+                 Guid="79A335A6-2130-485A-BEBB-D39DD418BA6A"
+                 Bitness="always64">
+        <RegistryKey Root="HKLM" Key="Software\Classes\relaybridge-printer" ForceDeleteOnUninstall="yes">
+          <RegistryValue Type="string" Value="URL:RelayBridge Printer Connectivity" KeyPath="yes" />
+          <RegistryValue Name="URL Protocol" Type="string" Value="" />
+          <RegistryKey Key="DefaultIcon">
+            <RegistryValue Type="string" Value="[SETUPDIR]RelayBridge.PrinterConfigurator.exe,0" />
+          </RegistryKey>
+          <RegistryKey Key="shell\open\command">
+            <RegistryValue Type="string"
+                           Value="&quot;[SETUPDIR]RelayBridge.PrinterConfigurator.exe&quot; &quot;%1&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+      </Component>
+      <Component Id="RelayBridgeManagementEndpointComponent"
+                 Guid="C78D9372-7958-4B65-AF32-E8F28A51CC82"
+                 Bitness="always64">
+        <RegistryValue Root="HKLM"
+                       Key="SOFTWARE\RelayBridge"
+                       Name="ManagementEndpoint"
+                       Type="string"
+                       Value="http://localhost:5080/"
+                       KeyPath="yes" />
+      </Component>
     </DirectoryRef>
 
     <Feature Id="RelayBridgeFeature" Title="RelayBridge" Level="1" AllowAbsent="no">
@@ -154,6 +184,8 @@
       <ComponentRef Id="ProgramDataDataComponent" />
       <ComponentRef Id="ProgramDataScratchComponent" />
       <ComponentRef Id="RelayBridgeProtocolComponent" />
+      <ComponentRef Id="RelayBridgePrinterProtocolComponent" />
+      <ComponentRef Id="RelayBridgeManagementEndpointComponent" />
     </Feature>
   </Package>
 </Wix>

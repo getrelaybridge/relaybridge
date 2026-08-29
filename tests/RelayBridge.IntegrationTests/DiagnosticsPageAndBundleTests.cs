@@ -179,6 +179,8 @@ public sealed class DiagnosticsPageAndBundleTests : IClassFixture<WebApplication
             Assert.Equal(DiagnosticEvidenceSource.Runtime, snapshot.Smtp.Evidence.Source);
             Assert.False(snapshot.Microsoft.Configured);
             Assert.Equal("Not configured", snapshot.Microsoft.Readiness);
+            Assert.Equal(DiagnosticStatus.NotConfigured, snapshot.Queue.Evidence.Status);
+            Assert.True(snapshot.Queue.WorkerRunning);
             Assert.Equal(ConnectivityProbeStage.NotRun, snapshot.Connectivity.Stage);
             Assert.Equal(DiagnosticEvidenceSource.Runtime, snapshot.Connectivity.Evidence.Source);
             Assert.Equal(9, snapshot.Storage.SchemaVersion);
@@ -266,6 +268,7 @@ public sealed class DiagnosticsPageAndBundleTests : IClassFixture<WebApplication
             builder.UseEnvironment("Testing");
             builder.UseSetting("Storage:DataDirectory", dataDirectory);
             builder.UseSetting("Smtp:Enabled", "false");
+            builder.UseSetting("Queue:Enabled", "true");
             builder.UseSetting("Smtp:ServerName", "ENVIRONMENT-TOKEN-MARKER");
             builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.ConfigureServices(services =>

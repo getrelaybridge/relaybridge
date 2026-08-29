@@ -19,8 +19,60 @@ This does not authorize binary publication; signing and Microsoft license clarif
 open. WiX OSMF/license compliance is closed for the current individual, non-revenue-generating use
 and requires re-evaluation if use becomes revenue-generating.
 
+The owner-retest remediation candidate validates in Release with 62 unit and 465 integration tests
+(527 total), zero failures/skips, clean license/static-security/PowerShell/NuGet gates, and a
+passing unsigned WiX MSI/Burn/SBOM/notices/payload build. This is an uncommitted local owner-test
+candidate only; it does not start M10 or authorize binary publication.
+
 ## Implemented
 
+- the single enabled queue-worker lifecycle now starts in a bounded inactive wait when Microsoft is
+  not configured and is released only after the existing authoritative candidate activation
+  transaction commits. The one-shot process-local latch cannot lose an activation wake, creates no
+  second worker, remains cancellation-aware during service shutdown, processes already queued mail
+  without a service restart, and does not override `Queue.Enabled=false`
+- dashboard and diagnostics now describe the normal pre-Microsoft queue-delivery state as
+  `Not configured`; actual worker, activation, storage, capacity, and permanent-failure conditions
+  retain their existing unavailable/attention semantics
+- normal SCM shutdown now gives SMTP sessions their own bounded 10-second graceful and 5-second
+  forced-close windows, and only an `OperationCanceledException` observed after the Host's
+  application-stopping lifetime is signaled is treated as expected at the process boundary
+- printer Apply now waits up to 45 seconds for SCM `Stopped`, observes the exact pre-stop service
+  process handle until that process exits, retries only bounded documented transient start-state
+  failures, waits for `Running` and management/SMTP readiness, and never enumerates, kills, or
+  controls an arbitrary process or service
+- printer Apply reports configuration-write failure, saved-configuration/restart failure,
+  started-service/readiness failure, and complete success as distinct truthful outcomes, retaining
+  only stage, timestamp, service state, and safe Win32 error code where available
+- native Microsoft setup result validation now exposes deterministic sanitized Stage/Substage/code
+  evidence for invalid certificate input, invalid reusable Entra evidence, unexpected diagnostic
+  output, malformed result envelopes, bounded-result overflow, and strict JSON-result failure;
+  raw Microsoft process output is not persisted or exposed
+- setup SMTP verification retries only an initial SMTP 535 authentication denial after validated
+  Exchange administration, using three bounded delays and a new TLS SMTP connection per attempt;
+  non-535, TLS, DNS/TCP, and production queue authentication behavior are unchanged, and no
+  MAIL/RCPT/DATA is sent before successful authentication
+- WixStdBA now uses the supported large hyperlink-license theme and a complete localization
+  contract, so the rendered caption is exactly `RelayBridge Setup`, the accurate MPL/Microsoft
+  prerequisite/direct-acquisition disclosure is visible, and standard buttons cannot fall back to
+  unresolved localization identifiers; the fixed management opener waits for loopback `/health`
+  before launching the setup page in the interactive user's default browser
+- owner onboarding candidate work reuses a securely persisted, unchanged completed Entra stage on
+  resume while still running the required Exchange administrator stage; missing, changed, or
+  incomplete candidate identity follows the full Entra path
+- printer-connectivity preparation now offers a UAC-authorized one-click apply through a dedicated
+  NativeAOT helper and one-shot revision URI. The fixed helper writes only
+  `C:\Program Files\RelayBridge\Host\appsettings.Production.json`, revalidates the selected private
+  listener, safely replaces and rereads exact bounded content, restarts only `RelayBridge`, and
+  requires management health plus SMTP listener readiness before success; manual download/copy and
+  narrowly scoped firewall guidance remain available, and Windows Firewall is never changed
+- the installer uses the RelayBridge project mark for Burn, ARP, and the desktop management
+  shortcut; installs LICENSE, third-party notices, and Getting Started; accurately separates
+  bundled unmodified prerequisites/tooling from direct-acquired Graph/Entra packages; and offers
+  the local Microsoft setup page after an interactive successful operation without service-context
+  browser launch
+- the per-machine desktop shortcut invokes a non-elevated fixed management resolver, which reads a
+  protected HKLM loopback endpoint and accepts no arbitrary URL
 - owner personal-test corrections keep the packaged SMTP listener and queue inert by default, while
   generated printer-connectivity configuration now enables both the selected listener and queue;
   the page provides download/copy actions, the exact environment override destination, safely
@@ -69,8 +121,8 @@ and requires re-evaluation if use becomes revenue-generating.
   DNS/TCP/TLS failures, degraded diagnostics, support-bundle privacy, preserved-state upgrade,
   acquisition, direct-MSI refusal, uninstall preservation, and healthy reinstall
 
-- WiX 6.0.2 x64 per-machine MSI with fixed `ProgramFiles64Folder` layout for Host, Setup, and
-  Tooling; standard MSI file, MSI 5.0 ACL, registry, service, repair, major-upgrade, and
+- WiX 6.0.2 x64 per-machine MSI with fixed `ProgramFiles64Folder` layout for Host, Setup, Tooling,
+  and Docs; standard MSI file, MSI 5.0 ACL, registry, service, repair, major-upgrade, and
   uninstall facilities are used with no custom actions or user-selectable security path
 - minimal Burn bootstrapper embeds exact hash-pinned Microsoft .NET Runtime 10.0.11 x64 and
   ASP.NET Core Runtime 10.0.11 x64 prerequisites; the MSI is now an internal chained package and
@@ -99,7 +151,8 @@ and requires re-evaluation if use becomes revenue-generating.
   fixed NativeAOT launcher with one quoted URI argument; repair restores it and uninstall removes
   only the RelayBridge-owned handler
 - LocalSystem `RelayBridge` service installation/start/stop/wait/delete uses `ServiceInstall`
-  and `ServiceControl`; no firewall rule or unstable hard-coded management shortcut is created
+  and `ServiceControl`; no firewall rule is created, and the installer-owned desktop shortcut uses
+  a stable resolver rather than a hard-coded configurable management port
 - protected ProgramData SDDL grants SYSTEM/Administrators full control, grants Users only
   read/execute on the root and scratch root, and grants no ordinary-user Data access; permanent
   ProgramData components preserve queue/configuration/history on repair, upgrade, and uninstall
@@ -296,9 +349,10 @@ and requires re-evaluation if use becomes revenue-generating.
 - SMTP/network/TLS/auth/authorization/sender/recipient/size/server/protocol/timeout
   results feed the existing queue policy; success persists Delivered before payload
   deletion, and no SQLite transaction spans network delivery
-- composed host registers the Exchange provider, keeps workers disabled by
-  default, and gates an explicitly enabled worker on local identity metadata plus
-  a usable certificate without contacting Microsoft at startup
+- composed host registers the Exchange provider, keeps workers disabled by default, and starts one
+  explicitly enabled worker lifecycle behind the activation latch; an existing active configuration
+  still opens it only after local identity metadata and a usable certificate pass without contacting
+  Microsoft at startup
 - Exchange delivery readiness remains distinct from identity and `/health`; a
   structured explicit test-message service exposes safe DNS/TCP/TLS/token/XOAUTH2/
   sender/final-acceptance checkpoints
@@ -327,8 +381,17 @@ and requires re-evaluation if use becomes revenue-generating.
 
 ## Verified
 
+- queue-activation regressions cover queued-before-activation processing in the existing worker,
+  authoritative activation wake, failed/cancelled/stale candidate isolation, repeated coalesced
+  notification, explicitly disabled queue behavior, pre-existing active startup, prompt shutdown
+  while waiting, and exact pre-configuration status semantics
 - Release build: 0 warnings, 0 errors
-- Unit tests: 59/59; integration tests: 431/431; total: 490/490; failed: 0; skipped: 0
+- Unit tests: 62/62; integration tests: 465/465; total: 527/527; failed: 0; skipped: 0
+- owner-retest remediation regressions cover bounded SMTP shutdown, expected Host cancellation,
+  exact service-process exit ordering, bounded transient SCM start retry, truthful Apply outcomes,
+  sanitized Step 3 parsing substages, candidate-bound Entra reuse, 535-to-235 propagation recovery,
+  bounded repeated 535, cancellation, non-auth/TLS no-loop behavior, no pre-auth mail commands,
+  WixStdBA localization, and fixed loopback management opening
 - owner personal-test defect regressions cover queue-enabled bounded deployment JSON, actionable
   administrator-assisted printer setup, direct active-configuration SMTP AUTH verification with no
   mail transaction, sanitized failure/readiness evidence, UI verify/repair separation, and
@@ -694,8 +757,10 @@ and requires re-evaluation if use becomes revenue-generating.
   remain environment-dependent validation evidence rather than claims of this run. The Advanced
   manual workflow remains available.
 - Newly created Exchange application authorization can transiently return SMTP `535` before
-  propagation completes. Setup remains fail closed, and its guidance now asks administrators to
-  wait briefly and retry after fresh setup before diagnosing persistent tenant/mailbox SMTP AUTH.
+  propagation completes. Setup remains fail closed and now performs only three brief bounded
+  verification retries for that exact post-administration condition before returning the normal
+  actionable tenant/mailbox SMTP AUTH failure. Production delivery does not classify every 535 as
+  transient propagation.
 - The parameter-free custom-URI launcher can still be invoked by another local page. It
   carries no authority, the service/launcher identity checks and native confirmation remain
   authoritative, and a launch-intent nonce is deferred as low-risk prompt-spam hardening.

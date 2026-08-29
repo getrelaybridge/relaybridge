@@ -169,7 +169,7 @@ internal sealed partial class PowerShellProcessRunner : IDisposable
         {
             _ = await Task.WhenAll(stdout, stderr).ConfigureAwait(false);
         }
-        catch (InvalidDataException)
+        catch (SetupResultException)
         {
         }
     }
@@ -191,7 +191,9 @@ internal sealed partial class PowerShellProcessRunner : IDisposable
             {
                 if (exceeded)
                 {
-                    throw new InvalidDataException("Microsoft setup produced more diagnostic output than RelayBridge accepts.");
+                    throw new SetupResultException(
+                        RelayBridge.Core.Microsoft.NativeSetupFailureSubstage.ResultSize,
+                        "DiagnosticOutputLimitExceeded");
                 }
 
                 return result.ToString();

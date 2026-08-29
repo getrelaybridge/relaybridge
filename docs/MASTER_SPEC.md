@@ -2069,12 +2069,19 @@ install Windows Service
 configure automatic startup
 start service
 register the parameter-free local setup URI
+register the revision-only printer-apply URI
+install a stable desktop management shortcut
+install concise license, third-party notice, and getting-started documentation
 ```
 
 Upgrade must preserve configuration.
 
-No firewall rule or unstable management shortcut is created. Uninstall preserves ProgramData and
-does not alter certificates or Microsoft tenant objects.
+No firewall rule is created. The desktop shortcut invokes a non-elevated RelayBridge-owned resolver
+that reads the installer/service-owned HKLM loopback endpoint, validates it, accepts no arbitrary
+URL, and opens the default browser in the interactive user session. Interactive completion offers
+the local Microsoft setup page; quiet/passive operation does not open a browser. Uninstall removes
+the shortcut while preserving ProgramData and does not alter certificates or Microsoft tenant
+objects.
 
 ---
 

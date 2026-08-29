@@ -58,20 +58,30 @@ builder.Services
     .Bind(builder.Configuration.GetSection("NativeMicrosoftSetup"))
     .Validate(options => ValidateNativeMicrosoftSetupOptions(options), "Native Microsoft setup configuration is invalid.")
     .ValidateOnStart();
+builder.Services
+    .AddOptions<PrinterConnectivityApplyOptions>()
+    .Bind(builder.Configuration.GetSection("PrinterConnectivityApply"))
+    .Validate(options => ValidatePrinterConnectivityApplyOptions(options), "Printer connectivity apply configuration is invalid.")
+    .ValidateOnStart();
 builder.Services.AddSingleton(serviceProvider => new RelayDatabase(
     serviceProvider.GetRequiredService<IOptions<RelayStorageOptions>>().Value,
     AppContext.BaseDirectory));
 builder.Services.AddSingleton(serviceProvider =>
     serviceProvider.GetRequiredService<IOptions<QueueOptions>>().Value);
 builder.Services.AddSingleton(serviceProvider =>
+    serviceProvider.GetRequiredService<IOptions<SmtpListenerOptions>>().Value);
+builder.Services.AddSingleton(serviceProvider =>
     serviceProvider.GetRequiredService<IOptions<MicrosoftIdentityOptions>>().Value);
 builder.Services.AddSingleton(serviceProvider =>
     serviceProvider.GetRequiredService<IOptions<ExchangeSmtpOptions>>().Value);
 builder.Services.AddSingleton(serviceProvider =>
     serviceProvider.GetRequiredService<IOptions<NativeMicrosoftSetupOptions>>().Value);
+builder.Services.AddSingleton(serviceProvider =>
+    serviceProvider.GetRequiredService<IOptions<PrinterConnectivityApplyOptions>>().Value);
 builder.Services.AddSingleton<ISpoolFileSystem, PhysicalSpoolFileSystem>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<QueueWorkSignal>();
+builder.Services.AddSingleton<QueueDeliveryActivation>();
 builder.Services.AddSingleton<QueueCapacityManager>();
 builder.Services.AddSingleton<DeviceService>();
 builder.Services.AddSingleton(serviceProvider => new DeviceOverviewService(
@@ -108,6 +118,7 @@ builder.Services.AddSingleton<ILanAddressDiscovery, SystemLanAddressDiscovery>()
 builder.Services.AddSingleton(serviceProvider => new DeviceEndpointAdvisor(
     serviceProvider.GetRequiredService<IOptions<SmtpListenerOptions>>().Value,
     serviceProvider.GetRequiredService<ILanAddressDiscovery>()));
+builder.Services.AddSingleton<PrinterConnectivityApplyCoordinator>();
 builder.Services.AddSingleton<IMailDeliveryProvider>(serviceProvider =>
     serviceProvider.GetRequiredService<ExchangeSmtpOAuthProvider>());
 builder.Services.AddSingleton(serviceProvider => new SmtpListener(
@@ -117,8 +128,10 @@ builder.Services.AddSingleton(serviceProvider => new SmtpListener(
     serviceProvider.GetRequiredService<DurableMessageStore>(),
     serviceProvider.GetRequiredService<ILogger<SmtpListener>>()));
 builder.Services.AddHostedService<QueueHostedService>();
+builder.Services.AddHostedService<ManagementEndpointPublisher>();
 builder.Services.AddHostedService<SmtpHostedService>();
 builder.Services.AddHostedService<NativeMicrosoftSetupHostedService>();
+builder.Services.AddHostedService<PrinterConnectivityApplyHostedService>();
 
 var app = builder.Build();
 
@@ -243,7 +256,31 @@ static bool ValidateNativeMicrosoftSetupOptions(NativeMicrosoftSetupOptions opti
     }
 }
 
-app.Run();
+static bool ValidatePrinterConnectivityApplyOptions(PrinterConnectivityApplyOptions options)
+{
+    try
+    {
+        options.Validate();
+        return true;
+    }
+    catch (InvalidOperationException)
+    {
+        return false;
+    }
+}
+
+try
+{
+    await app.RunAsync();
+}
+catch (OperationCanceledException exception) when (
+    HostShutdownExceptionPolicy.IsExpected(exception, app.Lifetime.ApplicationStopping))
+{
+    // WindowsServiceLifetime can surface the host shutdown deadline as an
+    // OperationCanceledException after SCM has requested a normal stop. The
+    // owned services have already been given their bounded stop opportunity;
+    // do not turn that administrative stop into a CLR crash record.
+}
 
 public partial class Program
 {

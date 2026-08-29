@@ -12,6 +12,7 @@ public sealed class QueueHostedService : IHostedService
     private readonly QueueReconciler _reconciler;
     private readonly QueueWorker _worker;
     private readonly QueueWorkSignal _workSignal;
+    private readonly QueueDeliveryActivation _deliveryActivation;
     private readonly RelayDatabase _database;
     private readonly MicrosoftCertificateService _certificates;
     private readonly QueueOptions _options;
@@ -21,6 +22,7 @@ public sealed class QueueHostedService : IHostedService
         QueueReconciler reconciler,
         QueueWorker worker,
         QueueWorkSignal workSignal,
+        QueueDeliveryActivation deliveryActivation,
         RelayDatabase database,
         MicrosoftCertificateService certificates,
         QueueOptions options,
@@ -29,6 +31,7 @@ public sealed class QueueHostedService : IHostedService
         _reconciler = reconciler;
         _worker = worker;
         _workSignal = workSignal;
+        _deliveryActivation = deliveryActivation;
         _database = database;
         _certificates = certificates;
         _options = options;
@@ -41,11 +44,14 @@ public sealed class QueueHostedService : IHostedService
         if (_options.Enabled)
         {
             var identity = _database.GetMicrosoftIdentityConfiguration(cancellationToken);
-            if (identity is null || !_certificates.Validate(identity.Certificate, cancellationToken).IsUsable)
+            if (identity is not null && _certificates.Validate(identity.Certificate, cancellationToken).IsUsable)
             {
-                _logger.LogWarning(
-                    "ExchangeQueueWorkerNotStarted Reason=MicrosoftIdentityNotReady");
-                return Task.CompletedTask;
+                _deliveryActivation.Activate();
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "ExchangeQueueWorkerWaiting Reason=MicrosoftIdentityNotReady");
             }
         }
 

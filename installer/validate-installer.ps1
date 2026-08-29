@@ -17,6 +17,7 @@ $packageRoot = Join-Path $artifactRoot 'package'
 $hostRoot = Join-Path $stageRoot 'Host'
 $setupRoot = Join-Path $stageRoot 'Setup'
 $toolingRoot = Join-Path $stageRoot 'Tooling'
+$docsRoot = Join-Path $stageRoot 'Docs'
 
 function Get-HexHash([string] $Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
@@ -58,6 +59,8 @@ function Assert-Manifest {
 $required = @(
     (Join-Path $hostRoot 'RelayBridge.Host.exe'),
     (Join-Path $setupRoot 'RelayBridge.SetupLauncher.exe'),
+    (Join-Path $setupRoot 'RelayBridge.PrinterConfigurator.exe'),
+    (Join-Path $setupRoot 'RelayBridge.ManagementOpener.exe'),
     (Join-Path $setupRoot 'RelayBridge.Setup.exe'),
     (Join-Path $setupRoot 'RelayBridge.Setup.dll'),
     (Join-Path $setupRoot 'RelayBridge.Setup.deps.json'),
@@ -70,6 +73,9 @@ $required = @(
     (Join-Path $toolingRoot 'Modules\Microsoft.Entra.Authentication\1.3.0\Microsoft.Entra.Authentication.psd1'),
     (Join-Path $toolingRoot 'Modules\Microsoft.Entra.Applications\1.3.0\Microsoft.Entra.Applications.psd1'),
     (Join-Path $toolingRoot 'Modules\ExchangeOnlineManagement\3.9.2\ExchangeOnlineManagement.psd1'),
+    (Join-Path $docsRoot 'LICENSE'),
+    (Join-Path $docsRoot 'THIRD-PARTY-NOTICES.md'),
+    (Join-Path $docsRoot 'GETTING-STARTED.md'),
     (Join-Path $packageRoot "RelayBridge-$Version-win-x64.msi"),
     (Join-Path $packageRoot "RelayBridge-Setup-$Version-win-x64.exe")
     (Join-Path $packageRoot "RelayBridge-$Version-win-x64.cdx.json")
@@ -92,7 +98,10 @@ if (-not $settings.NativeMicrosoftSetup.Enabled -or
     $settings.NativeMicrosoftSetup.InstallationRoot -ne 'C:\Program Files\RelayBridge' -or
     $settings.NativeMicrosoftSetup.ExpectedLauncherSha256 -ne (Get-HexHash (Join-Path $setupRoot 'RelayBridge.SetupLauncher.exe')) -or
     $settings.NativeMicrosoftSetup.ExpectedHelperManifestSha256 -ne (Get-HexHash $helperManifestPath) -or
-    $settings.NativeMicrosoftSetup.ExpectedToolingManifestSha256 -ne (Get-HexHash $toolingManifestPath)) {
+    $settings.NativeMicrosoftSetup.ExpectedToolingManifestSha256 -ne (Get-HexHash $toolingManifestPath) -or
+    -not $settings.PrinterConnectivityApply.Enabled -or
+    $settings.PrinterConnectivityApply.HelperPath -ne 'C:\Program Files\RelayBridge\Setup\RelayBridge.PrinterConfigurator.exe' -or
+    $settings.PrinterConnectivityApply.ExpectedHelperSha256 -ne (Get-HexHash (Join-Path $setupRoot 'RelayBridge.PrinterConfigurator.exe'))) {
     throw 'The staged Host trust-anchor configuration does not match the staged release.'
 }
 
@@ -114,6 +123,8 @@ foreach ($file in Get-ChildItem -LiteralPath $stageRoot -Recurse -File) {
 
 $generatedWix = Get-Content -LiteralPath (Join-Path $stageRoot 'GeneratedFiles.wxs') -Raw
 if ($generatedWix -notmatch 'ComponentGroup Id="RelayBridgePayload"' -or
+    $generatedWix -notmatch 'RelayBridgeDesktopShortcut' -or
+    $generatedWix -notmatch 'RelayBridge\.ManagementOpener\.exe' -or
     $generatedWix -match '\.local\\' -or
     $generatedWix -match 'appsettings\.Development' -or
     $generatedWix -match 'Tooling\\Modules\\Microsoft\.(Graph|Entra)\.') {
@@ -167,6 +178,10 @@ foreach ($requiredText in @(
     'ServiceInstall',
     'ServiceControl',
     'Software\Classes\relaybridge-setup',
+    'Software\Classes\relaybridge-printer',
+    'DesktopFolder',
+    'RelayBridge.PrinterConfigurator.exe',
+    'ARPPRODUCTICON',
     'CommonAppDataFolder',
     'Permanent="yes"',
     'MajorUpgrade'
@@ -182,10 +197,53 @@ foreach ($requiredText in @(
     'https://aka.ms/devservicesagreement',
     'PackageGroupRef Id="RelayBridgeExternalMicrosoftModules"',
     'RELAYBRIDGE_EXTERNAL_TOOLING_TRANSACTION'
+    'LogoFile=',
+    'IconSourceFile=',
+    'LaunchTarget=',
+    'LaunchArguments="--setup"',
+    'LocalizationFile="Bundle.en-us.wxl"',
+    'Theme="hyperlinkLargeLicense"'
 )) {
     if (-not $bundleSource.Contains($requiredText, [StringComparison]::Ordinal)) {
         throw "Required bundle acquisition/acceptance authoring is absent: $requiredText"
     }
+}
+
+[xml]$bundleLocalization = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Bundle.en-us.wxl') -Raw
+$bundleStrings = @($bundleLocalization.SelectNodes('/*[local-name()="WixLocalization"]/*[local-name()="String"]'))
+$requiredBundleStringIds = @(
+    'Caption', 'Title', 'CheckingForUpdatesLabel', 'UpdateButton',
+    'InstallHeader', 'InstallMessage', 'InstallMessageOptions', 'InstallVersion',
+    'ConfirmCancelMessage', 'ExecuteUpgradeRelatedBundleMessage',
+    'HelpHeader', 'HelpText', 'HelpCloseButton',
+    'InstallLicenseLinkText', 'InstallAcceptCheckbox', 'InstallOptionsButton',
+    'InstallInstallButton', 'InstallCancelButton',
+    'OptionsHeader', 'OptionsLocationLabel', 'OptionsBrowseButton', 'OptionsOkButton', 'OptionsCancelButton',
+    'ProgressHeader', 'ProgressLabel', 'OverallProgressPackageText', 'ProgressCancelButton',
+    'ModifyHeader', 'ModifyRepairButton', 'ModifyUninstallButton', 'ModifyCancelButton',
+    'SuccessHeader', 'SuccessCacheHeader', 'SuccessInstallHeader', 'SuccessLayoutHeader',
+    'SuccessModifyHeader', 'SuccessRepairHeader', 'SuccessUninstallHeader', 'SuccessUnsafeUninstallHeader',
+    'SuccessLaunchButton', 'SuccessRestartText', 'SuccessUninstallRestartText',
+    'SuccessRestartButton', 'SuccessCloseButton',
+    'FailureHeader', 'FailureCacheHeader', 'FailureInstallHeader', 'FailureLayoutHeader',
+    'FailureModifyHeader', 'FailureRepairHeader', 'FailureUninstallHeader', 'FailureUnsafeUninstallHeader',
+    'FailureHyperlinkLogText', 'FailureRestartText', 'FailureRestartButton', 'FailureCloseButton',
+    'FilesInUseTitle', 'FilesInUseLabel', 'FilesInUseNetfxCloseRadioButton',
+    'FilesInUseCloseRadioButton', 'FilesInUseDontCloseRadioButton',
+    'FilesInUseRetryButton', 'FilesInUseIgnoreButton', 'FilesInUseExitButton'
+)
+$actualBundleStringIds = @($bundleStrings | ForEach-Object { $_.GetAttribute('Id') })
+$missingBundleStringIds = @($requiredBundleStringIds | Where-Object { $_ -notin $actualBundleStringIds })
+$duplicateBundleStringIds = @($actualBundleStringIds | Group-Object | Where-Object Count -gt 1)
+if ($missingBundleStringIds.Count -gt 0 -or $duplicateBundleStringIds.Count -gt 0) {
+    throw "The WixStdBA localization contract is incomplete or ambiguous. Missing: $($missingBundleStringIds -join ', ')."
+}
+if ($bundleStrings | Where-Object { $_.GetAttribute('Value').Contains('#(loc.', [StringComparison]::Ordinal) }) {
+    throw 'The WixStdBA localization contains an unresolved localization reference.'
+}
+$acceptanceText = ($bundleStrings | Where-Object { $_.GetAttribute('Id') -eq 'InstallAcceptCheckbox' }).GetAttribute('Value')
+if ($acceptanceText -ne 'I &accept the Microsoft Graph terms') {
+    throw 'The Microsoft Graph acceptance label is not the tested concise installer text.'
 }
 
 Write-Output 'RELAYBRIDGE_INSTALLER_VALIDATION=PASS'

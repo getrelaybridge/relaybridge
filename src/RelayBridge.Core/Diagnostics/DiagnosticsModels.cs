@@ -89,6 +89,7 @@ public sealed record CertificateDiagnosticSnapshot(
 public sealed record SetupDiagnosticSnapshot(
     DiagnosticEvidence Evidence,
     string Stage,
+    string Substage,
     string Category,
     string? SafeCode,
     string? PowerShellExceptionType,
@@ -195,9 +196,17 @@ public static class DiagnosticsItemStatusPolicy
     public static DiagnosticStatus Queue(
         bool workerExpected,
         bool workerRunning,
+        bool microsoftConfigured,
+        bool deliveryActivated,
         int permanentFailureCount) => workerExpected && !workerRunning
             ? DiagnosticStatus.Unavailable
-            : permanentFailureCount > 0 ? DiagnosticStatus.Attention : DiagnosticStatus.Healthy;
+            : permanentFailureCount > 0
+                ? DiagnosticStatus.Attention
+                : workerExpected && !microsoftConfigured
+                    ? DiagnosticStatus.NotConfigured
+                    : workerExpected && !deliveryActivated
+                        ? DiagnosticStatus.Unavailable
+                        : DiagnosticStatus.Healthy;
 
     public static DiagnosticStatus Certificate(CertificateValidationStatus status) => status switch
     {

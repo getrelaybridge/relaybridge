@@ -46,8 +46,8 @@ See [BUILD_STATUS.md](BUILD_STATUS.md) for verified repository state and
 
 ## Architecture
 
-RelayBridge runtime uses one service process with three primary projects, plus two
-short-lived setup executables:
+RelayBridge runtime uses one service process with three primary projects, plus narrowly scoped
+interactive helpers:
 
 - `RelayBridge.Core` contains business rules and true external-boundary contracts.
 - `RelayBridge.Infrastructure` contains persistence, Microsoft, SMTP, certificate,
@@ -57,6 +57,10 @@ short-lived setup executables:
   by the Host. It launches only the fixed managed worker with a clean environment.
 - `RelayBridge.Setup` is the subordinate managed Microsoft provisioning worker. It has
   no direct Host authority and owns no runtime delivery function.
+- `RelayBridge.PrinterConfigurator` is the UAC-elevated NativeAOT helper that can apply only the
+  current approved private-LAN listener configuration and restart only the RelayBridge service.
+- `RelayBridge.ManagementOpener` is a non-elevated NativeAOT resolver used by the desktop shortcut
+  and installer completion action; it opens only the protected loopback management endpoint.
 
 The dependency direction is `Host -> Infrastructure -> Core`; Host may also use
 Core directly. See [docs/architecture/overview.md](docs/architecture/overview.md)

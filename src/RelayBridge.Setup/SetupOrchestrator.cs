@@ -13,6 +13,7 @@ internal sealed class SetupOrchestrator
     private const string ResultPrefix = "RELAYBRIDGE_RESULT:";
     private readonly Stream _output;
     private readonly NativeSetupStartRequest _start;
+    private NativeSetupStage _stage = NativeSetupStage.VerifyingTools;
 
     internal SetupOrchestrator(Stream output, NativeSetupStartRequest start)
     {
@@ -31,17 +32,37 @@ internal sealed class SetupOrchestrator
                 _start.ToolingRoot,
                 _start.ToolingManifestPath,
                 _start.ToolingManifestSha256);
-            var certificateBytes = Convert.FromBase64String(_start.PublicCertificateBase64);
-            if (certificateBytes.Length is <= 0 or > 3072)
+            byte[] certificateBytes;
+            try
             {
-                throw new InvalidDataException("The public certificate payload is invalid.");
+                certificateBytes = Convert.FromBase64String(_start.PublicCertificateBase64);
+            }
+            catch (FormatException exception)
+            {
+                throw new SetupResultException(
+                    NativeSetupFailureSubstage.PublicCertificateValidation,
+                    "InvalidPublicCertificate",
+                    exception);
             }
 
-            var entraPayload = new EntraExecutorPayload(
-                _start.ApplicationDisplayName,
-                _start.PublicCertificateBase64);
-            await StageAsync(NativeSetupStage.WaitingForEntraSignIn, cancellationToken).ConfigureAwait(false);
-            var entra = await ExecuteEntraAsync(entraPayload, cancellationToken).ConfigureAwait(false);
+            if (certificateBytes.Length is <= 0 or > 3072)
+            {
+                throw new SetupResultException(
+                    NativeSetupFailureSubstage.PublicCertificateValidation,
+                    "InvalidPublicCertificate");
+            }
+
+            var entra = await ResolveEntraResultAsync(
+                _start,
+                async token =>
+                {
+                    var entraPayload = new EntraExecutorPayload(
+                        _start.ApplicationDisplayName,
+                        _start.PublicCertificateBase64);
+                    await StageAsync(NativeSetupStage.WaitingForEntraSignIn, token).ConfigureAwait(false);
+                    return await ExecuteEntraAsync(entraPayload, token).ConfigureAwait(false);
+                },
+                cancellationToken).ConfigureAwait(false);
             await NativeSetupPipeProtocol.WriteAsync(
                 _output,
                 new NativeSetupEnvelope(
@@ -95,11 +116,43 @@ internal sealed class SetupOrchestrator
                 exception.SafeFailureDetails).ConfigureAwait(false);
             return false;
         }
+        catch (SetupResultException exception)
+        {
+            await TrySendFailureAsync(
+                NativeSetupFailureCategory.InvalidResult,
+                exception.SafeCode,
+                failureSubstage: exception.FailureSubstage).ConfigureAwait(false);
+            return false;
+        }
         catch (Exception exception) when (exception is InvalidDataException or FormatException or IOException)
         {
             await TrySendFailureAsync(NativeSetupFailureCategory.InvalidResult, exception.GetType().Name).ConfigureAwait(false);
             return false;
         }
+    }
+
+    internal static Task<EntraSetupResult> ResolveEntraResultAsync(
+        NativeSetupStartRequest start,
+        Func<CancellationToken, Task<EntraSetupResult>> executeEntra,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(start);
+        ArgumentNullException.ThrowIfNull(executeEntra);
+        if (start.ReusableEntraResult is not { } reusable)
+        {
+            return executeEntra(cancellationToken);
+        }
+
+        if (!start.IsRepair || start.SetupMode != MicrosoftSetupMode.NewApplication ||
+            reusable.TenantId == Guid.Empty || reusable.ClientId == Guid.Empty ||
+            reusable.ServicePrincipalObjectId == Guid.Empty || reusable.ApiPermissionEntryCount != 0)
+        {
+            throw new SetupResultException(
+                NativeSetupFailureSubstage.ReusableEntraValidation,
+                "InvalidReusableEntraResult");
+        }
+
+        return Task.FromResult(reusable);
     }
 
     internal static async Task ListenForCancellationAsync(
@@ -226,6 +279,7 @@ internal sealed class SetupOrchestrator
 
     private async Task StageAsync(NativeSetupStage stage, CancellationToken cancellationToken)
     {
+        _stage = stage;
         await NativeSetupPipeProtocol.WriteAsync(
             _output,
             new NativeSetupEnvelope(
@@ -248,7 +302,8 @@ internal sealed class SetupOrchestrator
     private async Task TrySendFailureAsync(
         NativeSetupFailureCategory category,
         string safeCode,
-        NativeSetupSafeFailureDetails? safeFailureDetails = null)
+        NativeSetupSafeFailureDetails? safeFailureDetails = null,
+        NativeSetupFailureSubstage failureSubstage = NativeSetupFailureSubstage.None)
     {
         try
         {
@@ -260,9 +315,11 @@ internal sealed class SetupOrchestrator
                         ? NativeSetupMessageKind.Cancelled
                         : NativeSetupMessageKind.Failed,
                     _start.SessionId,
+                    Stage: _stage,
                     FailureCategory: category,
                     SafeCode: safeCode,
-                    SafeFailureDetails: safeFailureDetails),
+                    SafeFailureDetails: safeFailureDetails,
+                    FailureSubstage: failureSubstage),
                 CancellationToken.None).ConfigureAwait(false);
         }
         catch (IOException)
@@ -284,19 +341,25 @@ internal sealed class SetupOrchestrator
 
         if (!string.IsNullOrWhiteSpace(result.StandardError))
         {
-            throw new InvalidDataException("Microsoft setup returned unexpected diagnostic output.");
+            throw new SetupResultException(
+                NativeSetupFailureSubstage.ResultDiagnosticOutput,
+                "UnexpectedDiagnosticOutput");
         }
 
         var lines = result.StandardOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
         if (lines.Length != 1 || !lines[0].StartsWith(ResultPrefix, StringComparison.Ordinal))
         {
-            throw new InvalidDataException("Microsoft setup did not return exactly one structured result.");
+            throw new SetupResultException(
+                NativeSetupFailureSubstage.ResultEnvelope,
+                "MalformedResultEnvelope");
         }
 
         var json = lines[0][ResultPrefix.Length..];
         if (Encoding.UTF8.GetByteCount(json) > NativeMicrosoftSetupProtocol.MaximumMessageBytes)
         {
-            throw new InvalidDataException("Microsoft setup returned an oversized result.");
+            throw new SetupResultException(
+                NativeSetupFailureSubstage.ResultSize,
+                "ResultTooLarge");
         }
 
         var options = new JsonSerializerOptions
@@ -308,11 +371,16 @@ internal sealed class SetupOrchestrator
         try
         {
             return JsonSerializer.Deserialize<T>(json, options)
-                ?? throw new InvalidDataException("Microsoft setup returned an empty result.");
+                ?? throw new SetupResultException(
+                    NativeSetupFailureSubstage.ResultJson,
+                    "EmptyStructuredResult");
         }
         catch (JsonException exception)
         {
-            throw new InvalidDataException("Microsoft setup returned an invalid structured result.", exception);
+            throw new SetupResultException(
+                NativeSetupFailureSubstage.ResultJson,
+                "MalformedStructuredResult",
+                exception);
         }
     }
 
@@ -335,6 +403,23 @@ internal sealed class SetupOrchestrator
         bool UnexpectedModuleDiscovery);
 
     private sealed record ExchangeExecutorPayload(Guid ClientId, Guid ServicePrincipalObjectId, string SenderMailbox);
+}
+
+internal sealed class SetupResultException : IOException
+{
+    internal SetupResultException(
+        NativeSetupFailureSubstage failureSubstage,
+        string safeCode,
+        Exception? innerException = null)
+        : base("Microsoft setup returned invalid bounded data.", innerException)
+    {
+        FailureSubstage = failureSubstage;
+        SafeCode = safeCode;
+    }
+
+    internal NativeSetupFailureSubstage FailureSubstage { get; }
+
+    internal string SafeCode { get; }
 }
 
 internal sealed class ProvisioningException : Exception
