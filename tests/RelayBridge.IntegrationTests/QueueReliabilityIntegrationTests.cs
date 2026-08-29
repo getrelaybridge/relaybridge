@@ -105,6 +105,8 @@ public sealed class QueueReliabilityIntegrationTests
         restartedDatabase.Initialize();
         var restartedOptions = original.Options;
         var restartedSignal = new QueueWorkSignal();
+        var restartedDeliveryActivation = new QueueDeliveryActivation();
+        restartedDeliveryActivation.Activate();
         var reconciler = new QueueReconciler(
             restartedDatabase,
             original.FileSystem,
@@ -119,6 +121,7 @@ public sealed class QueueReliabilityIntegrationTests
             provider,
             restartedOptions,
             restartedSignal,
+            restartedDeliveryActivation,
             original.TimeProvider,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<QueueWorker>.Instance);
 

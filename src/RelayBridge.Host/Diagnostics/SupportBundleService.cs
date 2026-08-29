@@ -30,6 +30,14 @@ public sealed class SupportBundleService
         "EntraApplicationVerificationFailed",
         "ExchangeWamConsoleUnavailable",
         "SessionTimeout",
+        "InvalidPublicCertificate",
+        "InvalidReusableEntraResult",
+        "UnexpectedDiagnosticOutput",
+        "MalformedResultEnvelope",
+        "ResultTooLarge",
+        "DiagnosticOutputLimitExceeded",
+        "EmptyStructuredResult",
+        "MalformedStructuredResult",
     };
     private readonly RelayDiagnosticsService _diagnostics;
     private readonly TimeProvider _timeProvider;
@@ -132,6 +140,7 @@ public sealed class SupportBundleService
             {
                 evidence = Export(snapshot.Setup.Evidence),
                 snapshot.Setup.Stage,
+                snapshot.Setup.Substage,
                 snapshot.Setup.Category,
                 safeCode = snapshot.Setup.SafeCode is not null && AllowedSetupCodes.Contains(snapshot.Setup.SafeCode)
                     ? snapshot.Setup.SafeCode

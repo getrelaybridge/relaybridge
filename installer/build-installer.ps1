@@ -26,6 +26,7 @@ $cacheRoot = Join-Path $artifactRoot 'cache'
 $prerequisiteRoot = Join-Path $artifactRoot 'prerequisites'
 $packageRoot = Join-Path $artifactRoot 'package'
 $symbolsRoot = Join-Path $artifactRoot 'symbols'
+$brandingRoot = Join-Path $artifactRoot 'branding'
 $lockPath = Join-Path $PSScriptRoot 'tooling-lock.json'
 $dotnet = Join-Path $env:ProgramFiles 'dotnet\dotnet.exe'
 $externalMsiExcludedRoots = @()
@@ -61,6 +62,82 @@ function Get-HexHash {
     )
 
     return (Get-FileHash -LiteralPath $Path -Algorithm $Algorithm).Hash.ToUpperInvariant()
+}
+
+function New-RelayBridgeBrandAssets {
+    $source = Join-Path $PSScriptRoot 'branding\relaybridge-mark.svg'
+    if ((Get-HexHash $source) -cne '407DA34A58F095CF192CCC3AECCF02B0CF2BF22E3975F8367D634DCD2B443569') {
+        throw 'The RelayBridge website mark does not match its reviewed public source.'
+    }
+
+    Add-Type -AssemblyName System.Drawing.Common
+    $bitmap = [Drawing.Bitmap]::new(128, 128, [Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $graphics.ScaleTransform(2, 2)
+        $background = [Drawing.Drawing2D.GraphicsPath]::new()
+        try {
+            $background.AddArc(0, 0, 28, 28, 180, 90)
+            $background.AddArc(36, 0, 28, 28, 270, 90)
+            $background.AddArc(36, 36, 28, 28, 0, 90)
+            $background.AddArc(0, 36, 28, 28, 90, 90)
+            $background.CloseFigure()
+            $brush = [Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(11, 31, 41))
+            try { $graphics.FillPath($brush, $background) } finally { $brush.Dispose() }
+        } finally { $background.Dispose() }
+
+        $pen = [Drawing.Pen]::new([Drawing.Color]::FromArgb(58, 216, 177), 5)
+        $pen.LineJoin = [Drawing.Drawing2D.LineJoin]::Round
+        try {
+            $left = [Drawing.Drawing2D.GraphicsPath]::new()
+            try {
+                $left.StartFigure()
+                $left.AddBezier(13, 24, 13, 19, 17, 15, 22, 15)
+                $left.AddLine(22, 15, 34, 15)
+                $left.AddLine(34, 15, 34, 24)
+                $left.AddLine(34, 24, 22, 24)
+                $left.AddLine(22, 24, 22, 32)
+                $left.AddLine(22, 32, 29, 32)
+                $left.AddLine(29, 32, 29, 41)
+                $left.AddLine(29, 41, 22, 41)
+                $left.AddBezier(22, 41, 17, 41, 13, 37, 13, 32)
+                $left.AddLine(13, 32, 13, 24)
+                $graphics.DrawPath($pen, $left)
+            } finally { $left.Dispose() }
+
+            $right = [Drawing.Drawing2D.GraphicsPath]::new()
+            try {
+                $right.StartFigure()
+                $right.AddBezier(51, 40, 51, 45, 47, 49, 42, 49)
+                $right.AddLine(42, 49, 30, 49)
+                $right.AddLine(30, 49, 30, 40)
+                $right.AddLine(30, 40, 42, 40)
+                $right.AddLine(42, 40, 42, 32)
+                $right.AddLine(42, 32, 35, 32)
+                $right.AddLine(35, 32, 35, 23)
+                $right.AddLine(35, 23, 42, 23)
+                $right.AddBezier(42, 23, 47, 23, 51, 27, 51, 32)
+                $right.AddLine(51, 32, 51, 40)
+                $graphics.DrawPath($pen, $right)
+            } finally { $right.Dispose() }
+        } finally { $pen.Dispose() }
+    } finally {
+        $graphics.Dispose()
+    }
+
+    $png = Join-Path $brandingRoot 'RelayBridge.png'
+    $ico = Join-Path $brandingRoot 'RelayBridge.ico'
+    $bitmap.Save($png, [Drawing.Imaging.ImageFormat]::Png)
+    $iconHandle = $bitmap.GetHicon()
+    $icon = [Drawing.Icon]::FromHandle($iconHandle)
+    try {
+        $stream = [IO.File]::Create($ico)
+        try { $icon.Save($stream) } finally { $stream.Dispose() }
+    } finally {
+        $icon.Dispose()
+        $bitmap.Dispose()
+    }
 }
 
 function Get-LockedFile {
@@ -258,7 +335,14 @@ function Write-WixDirectoryContents {
         }
         $ComponentIds.Add($componentId)
         [void]$Builder.AppendLine(('{0}<Component Id="{1}" Guid="*" Bitness="always64">' -f $padding, $componentId))
-        [void]$Builder.AppendLine(('{0}  <File Id="{1}" Source="{2}" KeyPath="yes"{3} />' -f $padding, $fileId, (Escape-XmlAttribute $file.FullName), $defaultLanguage))
+        if ($relative.Equals('Setup\RelayBridge.ManagementOpener.exe', [StringComparison]::OrdinalIgnoreCase)) {
+            [void]$Builder.AppendLine(('{0}  <File Id="{1}" Source="{2}" KeyPath="yes"{3}>' -f $padding, $fileId, (Escape-XmlAttribute $file.FullName), $defaultLanguage))
+            [void]$Builder.AppendLine(('{0}    <Shortcut Id="RelayBridgeDesktopShortcut" Directory="DesktopFolder" Name="RelayBridge" Description="Open RelayBridge local management" WorkingDirectory="INSTALLFOLDER" Icon="RelayBridge.ico" Advertise="yes" />' -f $padding))
+            [void]$Builder.AppendLine("$padding  </File>")
+        }
+        else {
+            [void]$Builder.AppendLine(('{0}  <File Id="{1}" Source="{2}" KeyPath="yes"{3} />' -f $padding, $fileId, (Escape-XmlAttribute $file.FullName), $defaultLanguage))
+        }
         [void]$Builder.AppendLine("$padding</Component>")
     }
 
@@ -319,7 +403,8 @@ function New-GeneratedWixSource {
     foreach ($topLevel in @(
         @{ Id = 'HOSTDIR'; Name = 'Host' },
         @{ Id = 'SETUPDIR'; Name = 'Setup' },
-        @{ Id = 'TOOLINGDIR'; Name = 'Tooling' }
+        @{ Id = 'TOOLINGDIR'; Name = 'Tooling' },
+        @{ Id = 'DOCSDIR'; Name = 'Docs' }
     )) {
         [void]$builder.AppendLine('  <Fragment>')
         [void]$builder.AppendLine(('    <DirectoryRef Id="{0}">' -f $topLevel.Id))
@@ -380,6 +465,8 @@ Reset-Directory $publishRoot
 Reset-Directory $stageRoot
 Reset-Directory $packageRoot
 Reset-Directory $symbolsRoot
+Reset-Directory $brandingRoot
+New-RelayBridgeBrandAssets
 New-Item -ItemType Directory -Path $cacheRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $prerequisiteRoot -Force | Out-Null
 
@@ -397,6 +484,8 @@ $hostPublish = Join-Path $publishRoot 'Host'
 $setupPublish = Join-Path $publishRoot 'Setup'
 $launcherPublish = Join-Path $publishRoot 'Launcher'
 $provisionerPublish = Join-Path $publishRoot 'Provisioner'
+$printerConfiguratorPublish = Join-Path $publishRoot 'PrinterConfigurator'
+$managementOpenerPublish = Join-Path $publishRoot 'ManagementOpener'
 
 Invoke-DotNet (@('publish', 'src\RelayBridge.Host\RelayBridge.Host.csproj') + $commonPublish + @('-o', $hostPublish))
 Invoke-DotNet (@('publish', 'src\RelayBridge.Setup\RelayBridge.Setup.csproj') + $commonPublish + @('-o', $setupPublish))
@@ -410,6 +499,30 @@ Invoke-DotNet @(
     '-p:DebugType=None',
     '-p:DebugSymbols=false',
     '-o', $launcherPublish,
+    '--nologo'
+)
+Invoke-DotNet @(
+    'publish',
+    'src\RelayBridge.PrinterConfigurator\RelayBridge.PrinterConfigurator.csproj',
+    '-c', $Configuration,
+    '-r', 'win-x64',
+    '--self-contained', 'true',
+    ('-p:Version=' + $Version),
+    '-p:DebugType=None',
+    '-p:DebugSymbols=false',
+    '-o', $printerConfiguratorPublish,
+    '--nologo'
+)
+Invoke-DotNet @(
+    'publish',
+    'src\RelayBridge.ManagementOpener\RelayBridge.ManagementOpener.csproj',
+    '-c', $Configuration,
+    '-r', 'win-x64',
+    '--self-contained', 'true',
+    ('-p:Version=' + $Version),
+    '-p:DebugType=None',
+    '-p:DebugSymbols=false',
+    '-o', $managementOpenerPublish,
     '--nologo'
 )
 Invoke-DotNet @(
@@ -428,10 +541,16 @@ Invoke-DotNet @(
 $hostStage = Join-Path $stageRoot 'Host'
 $setupStage = Join-Path $stageRoot 'Setup'
 $toolingStage = Join-Path $stageRoot 'Tooling'
-New-Item -ItemType Directory -Path $hostStage, $setupStage, $toolingStage | Out-Null
+$docsStage = Join-Path $stageRoot 'Docs'
+New-Item -ItemType Directory -Path $hostStage, $setupStage, $toolingStage, $docsStage | Out-Null
 Copy-Item -Path (Join-Path $hostPublish '*') -Destination $hostStage -Recurse
 Copy-Item -Path (Join-Path $setupPublish '*') -Destination $setupStage -Recurse
 Copy-Item -LiteralPath (Join-Path $launcherPublish 'RelayBridge.SetupLauncher.exe') -Destination $setupStage
+Copy-Item -LiteralPath (Join-Path $printerConfiguratorPublish 'RelayBridge.PrinterConfigurator.exe') -Destination $setupStage
+Copy-Item -LiteralPath (Join-Path $managementOpenerPublish 'RelayBridge.ManagementOpener.exe') -Destination $setupStage
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'LICENSE') -Destination $docsStage
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'docs\release\THIRD-PARTY-NOTICES.md') -Destination $docsStage
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'docs\release\GETTING-STARTED.md') -Destination $docsStage
 
 Get-ChildItem -LiteralPath $hostStage, $setupStage -Recurse -File |
     Where-Object { $_.Extension -in @('.pdb', '.dbg') -or $_.Name -eq 'appsettings.Development.json' } |
@@ -485,6 +604,8 @@ Write-JsonFile $provenance (Join-Path $toolingStage 'package-provenance.json') 8
 Invoke-OptionalSigning @(
     (Join-Path $hostStage 'RelayBridge.Host.exe'),
     (Join-Path $setupStage 'RelayBridge.SetupLauncher.exe'),
+    (Join-Path $setupStage 'RelayBridge.PrinterConfigurator.exe'),
+    (Join-Path $setupStage 'RelayBridge.ManagementOpener.exe'),
     (Join-Path $setupStage 'RelayBridge.Setup.exe'),
     (Join-Path $setupStage 'RelayBridge.Setup.dll'),
     (Join-Path $setupStage 'RelayBridge.Core.dll'),
@@ -522,6 +643,7 @@ $helperManifest = [ordered]@{ Version = 1; Files = $helperEntries }
 Write-JsonFile $helperManifest $helperManifestPath 6
 $helperManifestHash = Get-HexHash $helperManifestPath
 $launcherHash = Get-HexHash (Join-Path $setupStage 'RelayBridge.SetupLauncher.exe')
+$printerConfiguratorHash = Get-HexHash (Join-Path $setupStage 'RelayBridge.PrinterConfigurator.exe')
 
 $settingsPath = Join-Path $hostStage 'appsettings.json'
 $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
@@ -536,6 +658,9 @@ $settings.NativeMicrosoftSetup.ExpectedHelperManifestSha256 = $helperManifestHas
 $settings.NativeMicrosoftSetup.ToolingRoot = 'C:\Program Files\RelayBridge\Tooling'
 $settings.NativeMicrosoftSetup.ToolingManifestPath = 'C:\Program Files\RelayBridge\Tooling\tooling-manifest.json'
 $settings.NativeMicrosoftSetup.ExpectedToolingManifestSha256 = $toolingManifestHash
+$settings.PrinterConnectivityApply.Enabled = $true
+$settings.PrinterConnectivityApply.HelperPath = 'C:\Program Files\RelayBridge\Setup\RelayBridge.PrinterConfigurator.exe'
+$settings.PrinterConnectivityApply.ExpectedHelperSha256 = $printerConfiguratorHash
 Write-JsonFile $settings $settingsPath 12
 
 New-GeneratedWixSource
@@ -551,6 +676,7 @@ Invoke-DotNet @(
     '-c', $Configuration,
     ('-p:ProductVersion=' + $Version),
     ('-p:StageRoot=' + $stageRoot),
+    ('-p:BrandingRoot=' + $brandingRoot),
     ('-p:OutputPath=' + $packageRoot + '\'),
     '--nologo'
 )
@@ -572,6 +698,7 @@ if (-not $SkipBundle) {
         ('-p:ProvisionerPath=' + (Join-Path $provisionerPublish 'RelayBridge.ToolingProvisioner.exe')),
         ('-p:ToolingManifestPath=' + $toolingManifestPath),
         ('-p:GeneratedAcquisitionSource=' + (Join-Path $stageRoot 'GeneratedAcquisition.wxs')),
+        ('-p:BrandingRoot=' + $brandingRoot),
         ('-p:OutputPath=' + $packageRoot + '\'),
         '--nologo'
     )

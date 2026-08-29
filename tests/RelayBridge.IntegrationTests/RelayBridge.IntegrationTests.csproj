@@ -21,6 +21,8 @@
     <ProjectReference Include="..\..\src\RelayBridge.Setup\RelayBridge.Setup.csproj" Aliases="setup" />
     <ProjectReference Include="..\..\src\RelayBridge.SetupLauncher\RelayBridge.SetupLauncher.csproj" Aliases="launcher" />
     <ProjectReference Include="..\..\src\RelayBridge.ToolingProvisioner\RelayBridge.ToolingProvisioner.csproj" Aliases="provisioner" />
+    <ProjectReference Include="..\..\src\RelayBridge.PrinterConfigurator\RelayBridge.PrinterConfigurator.csproj" Aliases="printerconfigurator" />
+    <ProjectReference Include="..\..\src\RelayBridge.ManagementOpener\RelayBridge.ManagementOpener.csproj" Aliases="managementopener" />
     <ProjectReference Include="..\RelayBridge.StartupHookProbe\RelayBridge.StartupHookProbe.csproj" />
     <ProjectReference Include="..\RelayBridge.ConsoleHostProbe\RelayBridge.ConsoleHostProbe.csproj" Aliases="consoleprobe" />
   </ItemGroup>

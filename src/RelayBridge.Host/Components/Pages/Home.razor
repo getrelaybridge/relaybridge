@@ -172,15 +172,23 @@
     private int ActiveQueueCount => WaitingCount + _snapshot.Queue.DeliveringCount;
     private string QueueStatus => _snapshot.Queue.PermanentFailureCount > 0
         ? "Needs attention"
-        : _snapshot.Queue.DeliveringCount > 0 ? "Delivering" : WaitingCount > 0 ? "Waiting" : "Clear";
+        : _snapshot.Queue.DeliveringCount > 0
+            ? "Delivering"
+            : !MicrosoftConfigured ? "Not configured" : WaitingCount > 0 ? "Waiting" : "Clear";
     private string QueueStatusClass => _snapshot.Queue.PermanentFailureCount > 0
         ? "attention"
-        : ActiveQueueCount > 0 ? "neutral" : "ready";
+        : _snapshot.Queue.DeliveringCount > 0 || !MicrosoftConfigured || ActiveQueueCount > 0
+            ? "neutral"
+            : "ready";
     private string QueueStatusSymbol => _snapshot.Queue.PermanentFailureCount > 0
         ? "!"
-        : ActiveQueueCount > 0 ? "·" : "✓";
+        : _snapshot.Queue.DeliveringCount > 0 || !MicrosoftConfigured || ActiveQueueCount > 0
+            ? "·"
+            : "✓";
     private string QueueNote => _snapshot.Queue.DeliveringCount > 0
         ? $"{_snapshot.Queue.DeliveringCount} message{(_snapshot.Queue.DeliveringCount == 1 ? " is" : "s are")} actively being delivered."
+        : !MicrosoftConfigured
+            ? "Complete Microsoft setup to enable queue delivery."
         : WaitingCount == 0
         ? "No messages waiting."
         : _snapshot.Queue.OldestQueuedUtc is null

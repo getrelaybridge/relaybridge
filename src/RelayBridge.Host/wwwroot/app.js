@@ -20,5 +20,25 @@ window.relayBridge = {
     },
     launchMicrosoftSetup: function () {
         window.location.href = "relaybridge-setup://start";
+    },
+    launchPrinterApply: function (uri) {
+        if (!/^relaybridge-printer:\/\/apply\/[0-9a-f-]{36}$/i.test(uri)) {
+            throw new Error("Invalid RelayBridge printer apply request.");
+        }
+        window.location.href = uri;
+        window.setTimeout(async function waitForRelayBridge() {
+            for (let attempt = 0; attempt < 60; attempt++) {
+                try {
+                    const response = await fetch("/health", { cache: "no-store" });
+                    if (response.ok) {
+                        window.location.reload();
+                        return;
+                    }
+                } catch {
+                    // Expected while the approved helper restarts the service.
+                }
+                await new Promise(resolve => window.setTimeout(resolve, 1000));
+            }
+        }, 4000);
     }
 };

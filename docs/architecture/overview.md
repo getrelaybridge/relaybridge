@@ -58,6 +58,13 @@ Startup reconciles SQLite metadata with the two spool directories before any
 worker can claim mail. Admission reserves message count and bytes across active
 SMTP sessions and preserves a configurable free-disk floor.
 
+When queue processing is enabled before Microsoft setup, the single queue-worker lifecycle starts
+once and waits behind a process-local, cancellation-aware activation latch without claiming mail.
+Only the existing authoritative Microsoft activation transaction opens that latch, so queued mail
+becomes eligible without a service restart after successful activation. Failed, cancelled, stale,
+or replacement candidates do not wake delivery. Startup with an existing active identity retains
+the local identity and usable-certificate gate, and `Queue.Enabled=false` remains disabled.
+
 Inbound sessions are asynchronous and bounded globally and per source. Every
 device has source and sender allow-lists. Authenticated devices use LOGIN or PLAIN
 against a salted password verifier; Legacy devices omit AUTH but are restricted
@@ -117,6 +124,14 @@ SQLite mutation, so late Entra/Exchange results and activation lose compare-and-
 cancellation; a cancellation arriving after activation cannot roll it back. Credentials remain salted verifiers,
 and queue rows continue to reference stable device IDs.
 
+Native setup resume is stage-aware without adding a second authority flag. A completed Entra result
+is reconstructed only from the current active candidate when its activation identity, revision-bound
+captured state, mode, certificate reference, tenant, client/application, service-principal object,
+sender, step, and validated-stage flag are complete and fingerprint-valid. The worker then skips only
+Entra provisioning and proceeds through the normal Exchange authentication/configuration stage. A
+replacement, changed certificate/identity, incomplete result, or inactive lifecycle uses the full
+validated Entra path; no administrator token or WAM credential is reused.
+
 The bootstrap URI is parameter-free and grants no authority. It launches only the
 sidecar-free NativeAOT launcher. The service's first-instance pipe rejects remote clients.
 It authenticates the launcher's kernel-reported client PID, requires the process-token
@@ -162,7 +177,7 @@ storage. Cleanup occurs only after the launcher-owned process tree exits; uncert
 sessions are retained for lock-aware stale cleanup.
 
 The Windows installation boundary is an x64 per-machine WiX MSI chained by a Burn bootstrapper.
-The fixed layout is `Program Files\RelayBridge\{Host,Setup,Tooling}` plus protected, permanent
+The fixed layout is `Program Files\RelayBridge\{Host,Setup,Tooling,Docs}` plus protected, permanent
 `ProgramData\RelayBridge\{Data,SetupScratch}` state. Standard MSI service, registry, ACL, repair,
 major-upgrade, rollback, and uninstall facilities are used; there are no installer custom actions
 or firewall changes. The MSI is an internal chained package and rejects a clean direct install.
@@ -246,12 +261,18 @@ then verifies the reviewed Microsoft fingerprint and sender in the same SQLite i
 transaction. A change creates no device. Microsoft remains first, then
 a LAN-reachable listener, then authenticated intake where the chosen device mode
 requires it. The listener remains startup-bound and is not mutated by the UI.
-Printer-connectivity preparation instead emits bounded deployment configuration containing the
-selected listener and `Queue.Enabled=true`, plus safe active private-address candidates. The
-administrator can download or copy it, is shown the exact environment override destination and
-safely quoted elevated copy/restart commands, and receives manual firewall guidance scoped to the
-selected local address, port, Host executable, Private profile, and local subnet. The UI does not
-write privileged configuration, restart the service, or alter Windows Firewall automatically.
+Printer-connectivity preparation emits bounded deployment configuration containing the selected
+listener and `Queue.Enabled=true`, plus safe active private-address candidates. Apply stages only
+an in-memory, short-lived one-shot revision. The installed revision-only URI launches a dedicated
+UAC-elevated NativeAOT configurator; Host accepts only the exact installed helper path/hash and
+actual pipe PID/session, while the helper independently authenticates the LocalSystem service pipe.
+The helper reconstructs the fixed schema, revalidates the protected Program Files tree, safely
+replaces and rereads only `Host\appsettings.Production.json`, restarts only `RelayBridge` through
+SCM, and requires `/health` plus the selected SMTP listener before reporting success. Arbitrary
+paths, JSON, service names, addresses, ports, and shell commands never cross the boundary. Manual
+download/copy remains an advanced fallback. Firewall guidance stays scoped to the selected local
+address, port, Host executable, Private profile, and local subnet; RelayBridge never changes
+Windows Firewall automatically.
 Setup and detail views share the same address renderer; multiple network rules are
 edited and persisted as a complete visible collection rather than silently reduced.
 

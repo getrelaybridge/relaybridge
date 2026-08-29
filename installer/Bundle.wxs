@@ -10,10 +10,16 @@
           UpgradeCode="B77CE570-DC49-4D85-9819-F85F866B16D8"
           AboutUrl="https://getrelaybridge.com"
           HelpUrl="https://getrelaybridge.com"
+          IconSourceFile="$(var.BrandingRoot)\RelayBridge.ico"
           Compressed="yes">
     <BootstrapperApplication>
-      <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense"
+      <bal:WixStandardBootstrapperApplication Theme="hyperlinkLargeLicense"
                                                LicenseUrl="https://aka.ms/devservicesagreement"
+                                               LocalizationFile="Bundle.en-us.wxl"
+                                               LogoFile="$(var.BrandingRoot)\RelayBridge.png"
+                                               LaunchTarget="[ProgramFiles64Folder]RelayBridge\Setup\RelayBridge.ManagementOpener.exe"
+                                               LaunchArguments="--setup"
+                                               LaunchWorkingFolder="[ProgramFiles64Folder]RelayBridge"
                                                SuppressOptionsUI="yes"
                                                ShowVersion="yes" />
     </BootstrapperApplication>

@@ -74,19 +74,29 @@ public sealed class DiagnosticsStatusTests
     }
 
     [Theory]
-    [InlineData(false, false, 0, DiagnosticStatus.Healthy)]
-    [InlineData(true, false, 0, DiagnosticStatus.Unavailable)]
-    [InlineData(true, true, 1, DiagnosticStatus.Attention)]
-    [InlineData(true, true, 0, DiagnosticStatus.Healthy)]
+    [InlineData(false, false, false, false, 0, DiagnosticStatus.Healthy)]
+    [InlineData(true, false, false, false, 0, DiagnosticStatus.Unavailable)]
+    [InlineData(true, true, false, false, 0, DiagnosticStatus.NotConfigured)]
+    [InlineData(true, true, false, false, 1, DiagnosticStatus.Attention)]
+    [InlineData(true, true, true, false, 0, DiagnosticStatus.Unavailable)]
+    [InlineData(true, true, true, true, 1, DiagnosticStatus.Attention)]
+    [InlineData(true, true, true, true, 0, DiagnosticStatus.Healthy)]
     public void Queue_aggregate_status_preserves_worker_and_permanent_failure_meaning(
         bool workerExpected,
         bool workerRunning,
+        bool microsoftConfigured,
+        bool deliveryActivated,
         int permanentFailures,
         DiagnosticStatus expected)
     {
         Assert.Equal(
             expected,
-            DiagnosticsItemStatusPolicy.Queue(workerExpected, workerRunning, permanentFailures));
+            DiagnosticsItemStatusPolicy.Queue(
+                workerExpected,
+                workerRunning,
+                microsoftConfigured,
+                deliveryActivated,
+                permanentFailures));
     }
 
     private static DiagnosticStatus Evaluate(

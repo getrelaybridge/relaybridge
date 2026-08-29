@@ -13,7 +13,8 @@
     <ProvisionerPath Condition="'$(ProvisionerPath)' == ''">$(MSBuildThisFileDirectory)..\artifacts\installer\publish\Provisioner\RelayBridge.ToolingProvisioner.exe</ProvisionerPath>
     <ToolingManifestPath Condition="'$(ToolingManifestPath)' == ''">$(MSBuildThisFileDirectory)..\artifacts\installer\stage\Tooling\tooling-manifest.json</ToolingManifestPath>
     <GeneratedAcquisitionSource Condition="'$(GeneratedAcquisitionSource)' == ''">$(MSBuildThisFileDirectory)..\artifacts\installer\stage\GeneratedAcquisition.wxs</GeneratedAcquisitionSource>
-    <DefineConstants>ProductVersion=$(ProductVersion);PackageRoot=$(PackageRoot);PrerequisiteRoot=$(PrerequisiteRoot);ProvisionerPath=$(ProvisionerPath);ToolingManifestPath=$(ToolingManifestPath)</DefineConstants>
+    <BrandingRoot Condition="'$(BrandingRoot)' == ''">$(MSBuildThisFileDirectory)..\artifacts\installer\branding</BrandingRoot>
+    <DefineConstants>ProductVersion=$(ProductVersion);PackageRoot=$(PackageRoot);PrerequisiteRoot=$(PrerequisiteRoot);ProvisionerPath=$(ProvisionerPath);ToolingManifestPath=$(ToolingManifestPath);BrandingRoot=$(BrandingRoot)</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

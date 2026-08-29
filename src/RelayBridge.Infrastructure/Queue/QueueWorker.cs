@@ -15,10 +15,12 @@ public sealed class QueueWorker
     private readonly IMailDeliveryProvider _deliveryProvider;
     private readonly QueueOptions _options;
     private readonly QueueWorkSignal _workSignal;
+    private readonly QueueDeliveryActivation _deliveryActivation;
     private readonly TimeProvider _timeProvider;
     private readonly QueueRetryPolicy _retryPolicy;
     private readonly ILogger<QueueWorker> _logger;
     private CancellationTokenSource? _forceStop;
+    private CancellationTokenSource? _inactiveWaitStop;
     private Task[] _workerTasks = [];
     private volatile bool _stopRequested;
 
@@ -28,6 +30,7 @@ public sealed class QueueWorker
         IMailDeliveryProvider deliveryProvider,
         QueueOptions options,
         QueueWorkSignal workSignal,
+        QueueDeliveryActivation deliveryActivation,
         TimeProvider timeProvider,
         ILogger<QueueWorker> logger)
     {
@@ -36,6 +39,7 @@ public sealed class QueueWorker
         _deliveryProvider = deliveryProvider;
         _options = options;
         _workSignal = workSignal;
+        _deliveryActivation = deliveryActivation;
         _timeProvider = timeProvider;
         _logger = logger;
         _retryPolicy = new QueueRetryPolicy(
@@ -64,6 +68,7 @@ public sealed class QueueWorker
 
         _stopRequested = false;
         _forceStop = new CancellationTokenSource();
+        _inactiveWaitStop = new CancellationTokenSource();
         _workerTasks = Enumerable.Range(0, _options.MaxConcurrency)
             .Select(workerId => Task.Run(() => WorkerLoopAsync(workerId, _forceStop.Token), CancellationToken.None))
             .ToArray();
@@ -80,6 +85,7 @@ public sealed class QueueWorker
         }
 
         _stopRequested = true;
+        _inactiveWaitStop!.Cancel();
         _workSignal.Pulse();
         try
         {
@@ -110,6 +116,8 @@ public sealed class QueueWorker
         {
             _forceStop?.Dispose();
             _forceStop = null;
+            _inactiveWaitStop?.Dispose();
+            _inactiveWaitStop = null;
             _workerTasks = [];
             IsRunning = false;
             _logger.LogInformation("QueueWorkerStopped");
@@ -191,6 +199,11 @@ public sealed class QueueWorker
         {
             try
             {
+                if (!_deliveryActivation.IsActivated)
+                {
+                    await _deliveryActivation.WaitAsync(_inactiveWaitStop!.Token).ConfigureAwait(false);
+                }
+
                 if (await ProcessOneAsync(cancellationToken).ConfigureAwait(false))
                 {
                     continue;
@@ -202,6 +215,10 @@ public sealed class QueueWorker
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (OperationCanceledException) when (_stopRequested)
             {
                 break;
             }

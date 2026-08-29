@@ -6,9 +6,12 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using RelayBridge.Core.Microsoft;
 using RelayBridge.Core.Queue;
+using RelayBridge.Host.Services;
 using RelayBridge.Infrastructure.Microsoft;
+using RelayBridge.Infrastructure.Queue;
 using RelayBridge.Infrastructure.Storage;
 using Xunit;
 
@@ -368,6 +371,7 @@ public sealed class MicrosoftSetupIntegrationTests
         context.Setup.SetSenderMailbox("replacement@example.com");
         Assert.Throws<MicrosoftSetupConcurrencyException>(() =>
             context.Setup.ApplyNativeEntraResult(sessionA, entra));
+        Assert.False(context.QueueDeliveryActivation.IsActivated);
 
         PrepareNativeCandidateStart(context);
         sessionA = context.Setup.CaptureNativeCandidate();
@@ -379,12 +383,14 @@ public sealed class MicrosoftSetupIntegrationTests
         context.Setup.SetSenderMailbox("replacement@example.com");
         Assert.Throws<MicrosoftSetupConcurrencyException>(() =>
             context.Setup.ApplyNativeExchangeResult(sessionA, ValidExchangeResult()));
+        Assert.False(context.QueueDeliveryActivation.IsActivated);
 
         PrepareNativeCandidateStart(context);
         sessionA = context.Setup.CaptureNativeCandidate();
         context.Setup.SetSenderMailbox("scanner@example.com");
         Assert.Throws<MicrosoftSetupConcurrencyException>(() =>
             context.Setup.ApplyNativeEntraResult(sessionA, entra));
+        Assert.False(context.QueueDeliveryActivation.IsActivated);
     }
 
     [Fact]
@@ -412,6 +418,7 @@ public sealed class MicrosoftSetupIntegrationTests
         var active = context.Database.GetActiveMicrosoftConfiguration()!;
         Assert.Equal(originalActivation, active.ActivationId);
         Assert.Equal(original.ClientId, active.Identity.ClientId);
+        Assert.False(context.QueueDeliveryActivation.IsActivated);
     }
 
     [Fact]
@@ -442,6 +449,7 @@ public sealed class MicrosoftSetupIntegrationTests
         await Assert.ThrowsAsync<MicrosoftSetupConcurrencyException>(() => verification);
         Assert.Equal(MicrosoftSetupCandidateLifecycle.Cancelled, context.Setup.GetState().Lifecycle);
         Assert.Equal(originalActivation, context.Database.GetActiveMicrosoftConfiguration()!.ActivationId);
+        Assert.False(context.QueueDeliveryActivation.IsActivated);
     }
 
     [Fact]
@@ -580,6 +588,118 @@ public sealed class MicrosoftSetupIntegrationTests
     }
 
     [Fact]
+    public async Task Existing_queue_worker_wakes_after_authoritative_activation_without_service_restart()
+    {
+        await using var context = await SetupTestContext.CreateAsync();
+        var deliveryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new ScriptedDeliveryProvider((_, _, _) =>
+        {
+            deliveryStarted.TrySetResult();
+            return Task.FromResult(DeliveryResult.Succeeded());
+        });
+        var queue = CreateQueueLifecycle(context, enabled: true, provider);
+        await queue.HostedService.StartAsync(CancellationToken.None);
+
+        Assert.True(queue.Worker.IsRunning);
+        Assert.False(context.QueueDeliveryActivation.IsActivated);
+        var queued = await EnqueueAsync(queue);
+        await Task.Delay(200);
+        Assert.Empty(provider.MessageIds);
+
+        var candidate = PrepareNativeValidatedCandidate(context);
+        var activation = await context.Setup.VerifyAndActivateNativeAsync(candidate);
+
+        Assert.True(activation.Succeeded);
+        Assert.True(context.QueueDeliveryActivation.IsActivated);
+        await deliveryStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await WaitUntilAsync(
+            () => context.Database.GetQueuedMessages().Single(message => message.Id == queued.Id).State == QueueState.Delivered,
+            TimeSpan.FromSeconds(5));
+        context.QueueDeliveryActivation.Activate();
+        await Task.Delay(200);
+        Assert.Equal([queued.Id], provider.MessageIds);
+        Assert.True(queue.Worker.IsRunning);
+
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        await queue.HostedService.StopAsync(stop.Token);
+        Assert.False(queue.Worker.IsRunning);
+    }
+
+    [Fact]
+    public async Task Queue_disabled_remains_disabled_after_authoritative_activation()
+    {
+        await using var context = await SetupTestContext.CreateAsync();
+        var provider = new ScriptedDeliveryProvider(DeliveryResult.Succeeded());
+        var queue = CreateQueueLifecycle(context, enabled: false, provider);
+        await queue.HostedService.StartAsync(CancellationToken.None);
+        var queued = await EnqueueAsync(queue);
+
+        var candidate = PrepareNativeValidatedCandidate(context);
+        var activation = await context.Setup.VerifyAndActivateNativeAsync(candidate);
+
+        Assert.True(activation.Succeeded);
+        Assert.True(context.QueueDeliveryActivation.IsActivated);
+        Assert.False(queue.Worker.IsRunning);
+        await Task.Delay(200);
+        Assert.Empty(provider.MessageIds);
+        Assert.Equal(
+            QueueState.Queued,
+            context.Database.GetQueuedMessages().Single(message => message.Id == queued.Id).State);
+        await queue.HostedService.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Queue_worker_with_preexisting_active_configuration_retains_startup_behavior()
+    {
+        await using var context = await SetupTestContext.CreateAsync();
+        var configuration = MicrosoftIdentityConfiguration.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            context.Certificate);
+        var completed = CompletedState(context, configuration, Guid.NewGuid());
+        context.Database.ActivateMicrosoftConfiguration(
+            configuration,
+            completed.SenderMailbox!,
+            completed);
+        var deliveryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new ScriptedDeliveryProvider((_, _, _) =>
+        {
+            deliveryStarted.TrySetResult();
+            return Task.FromResult(DeliveryResult.Succeeded());
+        });
+        var queue = CreateQueueLifecycle(context, enabled: true, provider);
+        var queued = await EnqueueAsync(queue);
+
+        await queue.HostedService.StartAsync(CancellationToken.None);
+
+        Assert.True(context.QueueDeliveryActivation.IsActivated);
+        await deliveryStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await WaitUntilAsync(
+            () => context.Database.GetQueuedMessages().Single(message => message.Id == queued.Id).State == QueueState.Delivered,
+            TimeSpan.FromSeconds(5));
+        await queue.HostedService.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Queue_worker_waiting_for_activation_stops_promptly()
+    {
+        await using var context = await SetupTestContext.CreateAsync();
+        var queue = CreateQueueLifecycle(
+            context,
+            enabled: true,
+            new ScriptedDeliveryProvider(DeliveryResult.Succeeded()));
+        await queue.HostedService.StartAsync(CancellationToken.None);
+        Assert.True(queue.Worker.IsRunning);
+        Assert.False(context.QueueDeliveryActivation.IsActivated);
+
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        await queue.HostedService.StopAsync(stop.Token);
+
+        Assert.False(stop.IsCancellationRequested);
+        Assert.False(queue.Worker.IsRunning);
+    }
+
+    [Fact]
     public async Task Identical_configuration_reactivation_gets_a_fresh_activation_epoch()
     {
         await using var context = await SetupTestContext.CreateAsync();
@@ -628,13 +748,103 @@ public sealed class MicrosoftSetupIntegrationTests
 
         Assert.False(result.Succeeded);
         Assert.Equal("Authentication · SMTP 535", result.TechnicalCode);
-        Assert.Contains("may still be propagating", result.Message, StringComparison.Ordinal);
-        Assert.Contains("wait briefly and retry", result.Message, StringComparison.Ordinal);
+        Assert.Contains("propagation is not certain", result.Message, StringComparison.Ordinal);
+        Assert.Contains("retried briefly", result.Message, StringComparison.Ordinal);
         Assert.Contains("If the problem persists", result.Message, StringComparison.Ordinal);
         Assert.Contains("tenant and mailbox SMTP AUTH settings", result.Message, StringComparison.Ordinal);
         Assert.True(Guid.TryParse(result.CorrelationId, out _));
+        Assert.Equal(4, context.Server.ConnectionCount);
+        Assert.DoesNotContain(context.Server.Commands, command =>
+            command.StartsWith("MAIL", StringComparison.OrdinalIgnoreCase) ||
+            command.StartsWith("RCPT", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(command, "DATA", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(original.ClientId, context.Database.GetMicrosoftIdentityConfiguration()!.ClientId);
         Assert.Equal(MicrosoftSetupStep.VerifyExchange, context.Setup.GetState().Step);
+        Assert.False(context.QueueDeliveryActivation.IsActivated);
+    }
+
+    [Fact]
+    public async Task Setup_smtp_verification_retries_bounded_535_and_succeeds_after_propagation()
+    {
+        await using var context = await SetupTestContext.CreateAsync(new FakeExchangeScenario
+        {
+            AuthResults =
+            [
+                "535 5.7.3 Authentication unsuccessful",
+                "235 2.7.0 Authentication successful",
+            ],
+        });
+        PrepareCandidate(context, Guid.NewGuid(), Guid.NewGuid());
+        Assert.True((await context.Setup.VerifyIdentityAsync()).Succeeded);
+
+        var result = await context.Setup.VerifyExchangeAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(2, context.Server.ConnectionCount);
+        var authIndexes = context.Server.Commands
+            .Select((command, index) => (command, index))
+            .Where(item => item.command == "AUTH XOAUTH2 [REDACTED]")
+            .Select(item => item.index)
+            .ToArray();
+        Assert.Equal(2, authIndexes.Length);
+        var mailIndex = context.Server.Commands
+            .Select((command, index) => (command, index))
+            .Single(item => item.command.StartsWith("MAIL FROM:", StringComparison.OrdinalIgnoreCase))
+            .index;
+        Assert.True(mailIndex > authIndexes[1]);
+    }
+
+    [Fact]
+    public async Task Setup_smtp_verification_does_not_propagation_retry_tls_failure()
+    {
+        await using var context = await SetupTestContext.CreateAsync(new FakeExchangeScenario
+        {
+            StartTls = "454 4.7.0 TLS not available",
+        });
+        PrepareCandidate(context, Guid.NewGuid(), Guid.NewGuid());
+        Assert.True((await context.Setup.VerifyIdentityAsync()).Succeeded);
+
+        var result = await context.Setup.VerifyExchangeAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(1, context.Server.ConnectionCount);
+        Assert.Contains("SMTP 454", result.TechnicalCode, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Setup_smtp_verification_does_not_retry_non_535_auth_response()
+    {
+        await using var context = await SetupTestContext.CreateAsync(new FakeExchangeScenario
+        {
+            AuthResult = "550 5.7.1 Not authorized",
+        });
+        PrepareCandidate(context, Guid.NewGuid(), Guid.NewGuid());
+        Assert.True((await context.Setup.VerifyIdentityAsync()).Succeeded);
+
+        var result = await context.Setup.VerifyExchangeAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(1, context.Server.ConnectionCount);
+    }
+
+    [Fact]
+    public async Task Setup_smtp_propagation_wait_is_cancellable_without_sending_mail()
+    {
+        await using var context = await SetupTestContext.CreateAsync(
+            new FakeExchangeScenario { AuthResult = "535 5.7.3 Authentication unsuccessful" },
+            smtpPropagationRetryDelays: [TimeSpan.FromMinutes(1)]);
+        PrepareCandidate(context, Guid.NewGuid(), Guid.NewGuid());
+        Assert.True((await context.Setup.VerifyIdentityAsync()).Succeeded);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            context.Setup.VerifyExchangeAsync(cancellation.Token));
+
+        Assert.Equal(1, context.Server.ConnectionCount);
+        Assert.DoesNotContain(context.Server.Commands, command =>
+            command.StartsWith("MAIL", StringComparison.OrdinalIgnoreCase) ||
+            command.StartsWith("RCPT", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(command, "DATA", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -822,6 +1032,81 @@ public sealed class MicrosoftSetupIntegrationTests
         return context.Setup.ApplyNativeExchangeResult(candidate, ValidExchangeResult());
     }
 
+    private static QueueLifecycleHarness CreateQueueLifecycle(
+        SetupTestContext context,
+        bool enabled,
+        IMailDeliveryProvider provider)
+    {
+        var options = new QueueOptions
+        {
+            Enabled = enabled,
+            MaxConcurrency = 1,
+            PollInterval = TimeSpan.FromMilliseconds(100),
+            MinimumFreeDiskBytes = 0,
+        };
+        var fileSystem = new PhysicalSpoolFileSystem();
+        var signal = new QueueWorkSignal();
+        var capacity = new QueueCapacityManager(context.Database, fileSystem, options);
+        var store = new DurableMessageStore(context.Database, fileSystem, capacity, signal);
+        var worker = new QueueWorker(
+            context.Database,
+            fileSystem,
+            provider,
+            options,
+            signal,
+            context.QueueDeliveryActivation,
+            TimeProvider.System,
+            NullLogger<QueueWorker>.Instance);
+        var reconciler = new QueueReconciler(
+            context.Database,
+            fileSystem,
+            options,
+            TimeProvider.System,
+            NullLogger<QueueReconciler>.Instance);
+        var hostedService = new QueueHostedService(
+            reconciler,
+            worker,
+            signal,
+            context.QueueDeliveryActivation,
+            context.Database,
+            context.Certificates,
+            options,
+            NullLogger<QueueHostedService>.Instance);
+        var device = new DeviceService(context.Database).AddLegacyDevice(
+            $"Queue activation {Guid.NewGuid():N}",
+            ["127.0.0.1"],
+            ["scanner@example.com"]);
+        return new QueueLifecycleHarness(hostedService, worker, store, device.Id);
+    }
+
+    private static async Task<QueuedMessage> EnqueueAsync(QueueLifecycleHarness queue)
+    {
+        const int size = 64;
+        await using var receive = queue.Store.BeginReceive(size);
+        await receive.Stream.WriteAsync(new byte[size]);
+        return await receive.CommitAsync(
+            queue.DeviceId,
+            "scanner@example.com",
+            ["recipient@example.net"],
+            size,
+            CancellationToken.None);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
+    {
+        using var deadline = new CancellationTokenSource(timeout);
+        while (!condition())
+        {
+            await Task.Delay(20, deadline.Token);
+        }
+    }
+
+    private sealed record QueueLifecycleHarness(
+        QueueHostedService HostedService,
+        QueueWorker Worker,
+        DurableMessageStore Store,
+        Guid DeviceId);
+
     private sealed class SetupTestContext : IAsyncDisposable
     {
         private readonly string _dataDirectory;
@@ -838,6 +1123,7 @@ public sealed class MicrosoftSetupIntegrationTests
             MicrosoftIdentityRuntimeState identityRuntime,
             ExchangeDeliveryRuntimeState exchangeRuntime,
             ExchangeDeliveryTester exchangeTester,
+            QueueDeliveryActivation queueDeliveryActivation,
             MicrosoftSetupService setup)
         {
             _dataDirectory = dataDirectory;
@@ -850,6 +1136,7 @@ public sealed class MicrosoftSetupIntegrationTests
             IdentityRuntime = identityRuntime;
             ExchangeRuntime = exchangeRuntime;
             ExchangeTester = exchangeTester;
+            QueueDeliveryActivation = queueDeliveryActivation;
             Setup = setup;
         }
 
@@ -861,11 +1148,13 @@ public sealed class MicrosoftSetupIntegrationTests
         public MicrosoftIdentityRuntimeState IdentityRuntime { get; }
         public ExchangeDeliveryRuntimeState ExchangeRuntime { get; }
         public ExchangeDeliveryTester ExchangeTester { get; }
+        public QueueDeliveryActivation QueueDeliveryActivation { get; }
         public MicrosoftSetupService Setup { get; }
 
         public static Task<SetupTestContext> CreateAsync(
             FakeExchangeScenario? scenario = null,
-            MicrosoftSetupPersistenceHooks? persistenceHooks = null)
+            MicrosoftSetupPersistenceHooks? persistenceHooks = null,
+            IReadOnlyList<TimeSpan>? smtpPropagationRetryDelays = null)
         {
             var directory = Path.Combine(Path.GetTempPath(), "RelayBridge.SetupTests", Guid.NewGuid().ToString("N"));
             var database = new RelayDatabase(
@@ -911,14 +1200,18 @@ public sealed class MicrosoftSetupIntegrationTests
                 TimeProvider.System,
                 new TestLogger<ExchangeSmtpOAuthProvider>());
             var tester = new ExchangeDeliveryTester(provider, runtime, TimeProvider.System);
+            var queueDeliveryActivation = new QueueDeliveryActivation();
             var setup = new MicrosoftSetupService(
                 database,
                 certificates,
                 tokens,
                 identityTester,
                 tester,
+                queueDeliveryActivation,
                 TimeProvider.System,
-                persistenceHooks);
+                persistenceHooks,
+                smtpPropagationRetryDelays ??
+                    [TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1)]);
             return Task.FromResult(new SetupTestContext(
                 directory,
                 database,
@@ -930,6 +1223,7 @@ public sealed class MicrosoftSetupIntegrationTests
                 identityRuntime,
                 runtime,
                 tester,
+                queueDeliveryActivation,
                 setup));
         }
 
@@ -945,6 +1239,7 @@ public sealed class MicrosoftSetupIntegrationTests
                 TimeProvider.System,
                 new TestLogger<MicrosoftAuthenticationTester>()),
             ExchangeTester,
+            QueueDeliveryActivation,
             TimeProvider.System,
             persistenceHooks);
 

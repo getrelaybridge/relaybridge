@@ -11,6 +11,8 @@ namespace RelayBridge.Infrastructure.Smtp;
 
 public sealed class SmtpListener : IAsyncDisposable
 {
+    private static readonly TimeSpan GracefulSessionShutdownTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan ForcedSessionShutdownTimeout = TimeSpan.FromSeconds(5);
     private readonly SmtpListenerOptions _options;
     private readonly RelayDatabase _database;
     private readonly DeviceService _devices;
@@ -106,18 +108,24 @@ public sealed class SmtpListener : IAsyncDisposable
         {
             try
             {
-                await Task.WhenAll(activeSessions).WaitAsync(cancellationToken).ConfigureAwait(false);
+                await Task.WhenAll(activeSessions)
+                    .WaitAsync(GracefulSessionShutdownTimeout, cancellationToken)
+                    .ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (Exception exception) when (
+                exception is TimeoutException ||
+                exception is OperationCanceledException && cancellationToken.IsCancellationRequested)
             {
                 _sessionStopping?.Cancel();
                 try
                 {
                     await Task.WhenAll(activeSessions)
-                        .WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None)
+                        .WaitAsync(ForcedSessionShutdownTimeout, CancellationToken.None)
                         .ConfigureAwait(false);
                 }
-                catch (TimeoutException)
+                catch (Exception forcedException) when (
+                    forcedException is TimeoutException ||
+                    forcedException is OperationCanceledException && _sessionStopping?.IsCancellationRequested == true)
                 {
                     _logger.LogWarning(
                         "SmtpShutdownTimedOut ActiveSessionCount={ActiveSessionCount}",

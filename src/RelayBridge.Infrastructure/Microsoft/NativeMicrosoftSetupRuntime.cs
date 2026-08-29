@@ -66,6 +66,7 @@ public sealed class NativeMicrosoftSetupRuntime
                 SafeCode = null,
                 SafeCorrelationId = null,
                 SafeFailureDetails = null,
+                FailureSubstage = NativeSetupFailureSubstage.None,
                 UpdatedUtc = _timeProvider.GetUtcNow(),
             };
         }
@@ -90,6 +91,7 @@ public sealed class NativeMicrosoftSetupRuntime
                 SafeCode = null,
                 SafeCorrelationId = null,
                 SafeFailureDetails = null,
+                FailureSubstage = NativeSetupFailureSubstage.None,
                 UpdatedUtc = _timeProvider.GetUtcNow(),
             };
         }
@@ -123,6 +125,7 @@ public sealed class NativeMicrosoftSetupRuntime
                 SafeCode = null,
                 SafeCorrelationId = null,
                 SafeFailureDetails = null,
+                FailureSubstage = NativeSetupFailureSubstage.None,
                 UpdatedUtc = _timeProvider.GetUtcNow(),
             };
         }
@@ -133,7 +136,9 @@ public sealed class NativeMicrosoftSetupRuntime
         string message,
         string? safeCode,
         string? correlationId,
-        NativeSetupSafeFailureDetails? safeFailureDetails = null)
+        NativeSetupSafeFailureDetails? safeFailureDetails = null,
+        NativeSetupStage? stage = null,
+        NativeSetupFailureSubstage failureSubstage = NativeSetupFailureSubstage.None)
     {
         lock (_lock)
         {
@@ -141,11 +146,13 @@ public sealed class NativeMicrosoftSetupRuntime
             _snapshot = _snapshot with
             {
                 Running = false,
+                Stage = stage ?? _snapshot.Stage,
                 Message = message,
                 FailureCategory = category,
                 SafeCode = safeCode,
                 SafeCorrelationId = correlationId,
                 SafeFailureDetails = safeFailureDetails,
+                FailureSubstage = failureSubstage,
                 UpdatedUtc = _timeProvider.GetUtcNow(),
             };
         }
@@ -166,6 +173,7 @@ public sealed class NativeMicrosoftSetupRuntime
                 SafeCode = safeCode,
                 SafeCorrelationId = null,
                 SafeFailureDetails = null,
+                FailureSubstage = NativeSetupFailureSubstage.None,
                 UpdatedUtc = _timeProvider.GetUtcNow(),
             };
         }

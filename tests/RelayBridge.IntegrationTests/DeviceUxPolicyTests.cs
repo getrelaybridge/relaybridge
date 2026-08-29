@@ -317,11 +317,13 @@ public sealed class DeviceUxPolicyTests
             FindRepositoryRoot(), "src", "RelayBridge.Host", "Components", "Pages", "Settings.razor"));
 
         Assert.Contains("NOT YET APPLIED", source, StringComparison.Ordinal);
+        Assert.Contains("Apply printer connectivity", source, StringComparison.Ordinal);
+        Assert.Contains("Windows administrator confirmation", source, StringComparison.Ordinal);
         Assert.Contains("Download configuration", source, StringComparison.Ordinal);
         Assert.Contains("Copy configuration", source, StringComparison.Ordinal);
         Assert.Contains("Configuration destination", source, StringComparison.Ordinal);
         Assert.Contains("Queue processing after restart", source, StringComparison.Ordinal);
-        Assert.Contains("Apply from elevated PowerShell", source, StringComparison.Ordinal);
+        Assert.Contains("Advanced manual apply", source, StringComparison.Ordinal);
         Assert.Contains("The installer intentionally does not create a firewall rule", source, StringComparison.Ordinal);
         Assert.Contains("management UI remains available only from this computer", source, StringComparison.Ordinal);
         Assert.DoesNotContain("changes are applied", source, StringComparison.OrdinalIgnoreCase);

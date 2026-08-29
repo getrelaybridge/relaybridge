@@ -2,9 +2,67 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="en-us">
   <String Id="Caption" Value="RelayBridge Setup" />
-  <String Id="Title" Value="Microsoft prerequisites" />
+  <String Id="Title" Value="RelayBridge Setup" />
+  <String Id="CheckingForUpdatesLabel" Value="Checking for updates" />
+  <String Id="UpdateButton" Value="An update is available" />
   <String Id="InstallHeader" Value="Install RelayBridge" />
-  <String Id="InstallMessage" Value="RelayBridge will download Microsoft.Graph.Authentication 2.25.0, Microsoft.Graph.Applications 2.25.0, Microsoft.Entra.Authentication 1.3.0, and Microsoft.Entra.Applications 1.3.0 directly from Microsoft's PowerShell Gallery into RelayBridge's private tooling directory." />
-  <String Id="InstallLicenseLinkText" Value="View Microsoft license terms" />
-  <String Id="InstallAcceptCheckbox" Value="I have reviewed and accept the applicable Microsoft license terms for the Microsoft Graph components listed above." />
+  <String Id="InstallMessage" Value="RelayBridge-owned software is licensed under the Mozilla Public License 2.0.&#xA;&#xA;This installer includes unmodified .NET Runtime, ASP.NET Core Runtime, PowerShell, ExchangeOnlineManagement, and WiX components under their respective licenses.&#xA;&#xA;Microsoft.Graph.Authentication 2.25.0, Microsoft.Graph.Applications 2.25.0, Microsoft.Entra.Authentication 1.3.0, and Microsoft.Entra.Applications 1.3.0 are not bundled; exact required versions are acquired from Microsoft's official PowerShell Gallery after the applicable terms are accepted.&#xA;&#xA;RelayBridge is independent and is not affiliated with or endorsed by Microsoft. Full license and third-party notices are installed with RelayBridge." />
+  <String Id="InstallMessageOptions" Value="Choose installation options, then select Install." />
+  <String Id="InstallVersion" Value="Version [WixBundleVersion]" />
+  <String Id="ConfirmCancelMessage" Value="Are you sure you want to cancel?" />
+  <String Id="ExecuteUpgradeRelatedBundleMessage" Value="Previous version" />
+  <String Id="HelpHeader" Value="RelayBridge Setup help" />
+  <String Id="HelpText" Value="/install | /repair | /uninstall | /layout [directory]&#xA;/quiet | /passive | /norestart&#xA;/log &lt;log.txt&gt;" />
+  <String Id="HelpCloseButton" Value="&amp;Close" />
+  <String Id="InstallLicenseLinkText" Value="View the Microsoft Graph &lt;a href=&quot;#&quot;&gt;license terms&lt;/a&gt;." />
+  <String Id="InstallAcceptCheckbox" Value="I &amp;accept the Microsoft Graph terms" />
+  <String Id="InstallOptionsButton" Value="&amp;Options" />
+  <String Id="InstallInstallButton" Value="&amp;Install" />
+  <String Id="InstallCancelButton" Value="&amp;Cancel" />
+  <String Id="OptionsHeader" Value="Installation options" />
+  <String Id="OptionsLocationLabel" Value="Install location:" />
+  <String Id="OptionsBrowseButton" Value="&amp;Browse" />
+  <String Id="OptionsOkButton" Value="&amp;OK" />
+  <String Id="OptionsCancelButton" Value="&amp;Cancel" />
+  <String Id="ProgressHeader" Value="Installing RelayBridge" />
+  <String Id="ProgressLabel" Value="Please wait while setup completes." />
+  <String Id="OverallProgressPackageText" Value="Initializing" />
+  <String Id="ProgressCancelButton" Value="&amp;Cancel" />
+  <String Id="ModifyHeader" Value="Modify RelayBridge" />
+  <String Id="ModifyRepairButton" Value="&amp;Repair" />
+  <String Id="ModifyUninstallButton" Value="&amp;Uninstall" />
+  <String Id="ModifyCancelButton" Value="&amp;Cancel" />
+  <String Id="SuccessHeader" Value="Setup completed" />
+  <String Id="SuccessCacheHeader" Value="Setup files cached" />
+  <String Id="SuccessInstallHeader" Value="RelayBridge was installed" />
+  <String Id="SuccessLayoutHeader" Value="Layout created" />
+  <String Id="SuccessModifyHeader" Value="RelayBridge was modified" />
+  <String Id="SuccessRepairHeader" Value="RelayBridge was repaired" />
+  <String Id="SuccessUninstallHeader" Value="RelayBridge was uninstalled" />
+  <String Id="SuccessUnsafeUninstallHeader" Value="RelayBridge was uninstalled" />
+  <String Id="SuccessLaunchButton" Value="Open RelayBridge Setup" />
+  <String Id="SuccessRestartText" Value="Restart Windows to complete setup." />
+  <String Id="SuccessUninstallRestartText" Value="Restart Windows to complete removal." />
+  <String Id="SuccessRestartButton" Value="&amp;Restart" />
+  <String Id="SuccessCloseButton" Value="&amp;Close" />
+  <String Id="FailureHeader" Value="Setup was not completed" />
+  <String Id="FailureCacheHeader" Value="Setup files could not be cached" />
+  <String Id="FailureInstallHeader" Value="RelayBridge could not be installed" />
+  <String Id="FailureLayoutHeader" Value="The layout could not be created" />
+  <String Id="FailureModifyHeader" Value="RelayBridge could not be modified" />
+  <String Id="FailureRepairHeader" Value="RelayBridge could not be repaired" />
+  <String Id="FailureUninstallHeader" Value="RelayBridge could not be uninstalled" />
+  <String Id="FailureUnsafeUninstallHeader" Value="RelayBridge could not be completely uninstalled" />
+  <String Id="FailureHyperlinkLogText" Value="Open the setup log" />
+  <String Id="FailureRestartText" Value="Restart Windows and run setup again." />
+  <String Id="FailureRestartButton" Value="&amp;Restart" />
+  <String Id="FailureCloseButton" Value="&amp;Close" />
+  <String Id="FilesInUseTitle" Value="Files in use" />
+  <String Id="FilesInUseLabel" Value="Close the listed applications before continuing." />
+  <String Id="FilesInUseNetfxCloseRadioButton" Value="Close the applications and continue." />
+  <String Id="FilesInUseCloseRadioButton" Value="Close the applications automatically and continue." />
+  <String Id="FilesInUseDontCloseRadioButton" Value="Do not close the applications." />
+  <String Id="FilesInUseRetryButton" Value="&amp;Retry" />
+  <String Id="FilesInUseIgnoreButton" Value="&amp;Ignore" />
+  <String Id="FilesInUseExitButton" Value="E&amp;xit" />
 </WixLocalization>

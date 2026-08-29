@@ -28,6 +28,7 @@ public sealed class RelayDiagnosticsService
     private readonly SmtpListenerOptions _smtpOptions;
     private readonly QueueWorker _queueWorker;
     private readonly QueueOptions _queueOptions;
+    private readonly QueueDeliveryActivation _queueDeliveryActivation;
     private readonly MicrosoftCertificateService _certificates;
     private readonly MicrosoftIdentityRuntimeState _identity;
     private readonly ExchangeDeliveryRuntimeState _exchange;
@@ -45,6 +46,7 @@ public sealed class RelayDiagnosticsService
         IOptions<SmtpListenerOptions> smtpOptions,
         QueueWorker queueWorker,
         QueueOptions queueOptions,
+        QueueDeliveryActivation queueDeliveryActivation,
         MicrosoftCertificateService certificates,
         MicrosoftIdentityRuntimeState identity,
         ExchangeDeliveryRuntimeState exchange,
@@ -61,6 +63,7 @@ public sealed class RelayDiagnosticsService
         _smtpOptions = smtpOptions.Value;
         _queueWorker = queueWorker;
         _queueOptions = queueOptions;
+        _queueDeliveryActivation = queueDeliveryActivation;
         _certificates = certificates;
         _identity = identity;
         _exchange = exchange;
@@ -92,7 +95,7 @@ public sealed class RelayDiagnosticsService
             : null;
 
         var smtp = ReadSmtp(now, devices, queueFacts?.LastAcceptedUtc);
-        var queue = ReadQueue(now, queueFacts);
+        var queue = ReadQueue(now, queueFacts, active is not null);
         var microsoft = ReadMicrosoft(now, active, setupState);
         var certificate = ReadCertificate(now, active);
         var setup = ReadSetup(now, active is not null, setupState);
@@ -215,7 +218,8 @@ public sealed class RelayDiagnosticsService
 
     private QueueDiagnosticSnapshot ReadQueue(
         DateTimeOffset now,
-        LocalQueueDiagnosticFacts? facts)
+        LocalQueueDiagnosticFacts? facts,
+        bool microsoftConfigured)
     {
         if (facts is null)
         {
@@ -233,13 +237,21 @@ public sealed class RelayDiagnosticsService
         var status = DiagnosticsItemStatusPolicy.Queue(
             _queueOptions.Enabled,
             _queueWorker.IsRunning,
+            microsoftConfigured,
+            _queueDeliveryActivation.IsActivated,
             metrics.PermanentFailureCount);
         var active = metrics.QueuedCount + metrics.RetryScheduledCount + metrics.DeliveringCount;
         var summary = !workerHealthy
             ? "Queue delivery is enabled, but the worker is not running."
             : metrics.PermanentFailureCount > 0
                 ? $"{metrics.PermanentFailureCount} message(s) have permanently failed."
-                : active == 0 ? "No messages are waiting or being delivered." : $"{active} message(s) are active in the queue.";
+                : _queueOptions.Enabled && !microsoftConfigured
+                    ? "Queue delivery is waiting for Microsoft configuration."
+                    : _queueOptions.Enabled && !_queueDeliveryActivation.IsActivated
+                        ? "Queue delivery cannot use the active Microsoft configuration."
+                        : active == 0
+                            ? "No messages are waiting or being delivered."
+                            : $"{active} message(s) are active in the queue.";
         return new QueueDiagnosticSnapshot(
             new DiagnosticEvidence(status, now, DiagnosticEvidenceSource.PersistedState, summary),
             active,
@@ -376,6 +388,7 @@ public sealed class RelayDiagnosticsService
                         ? "The last native Microsoft setup attempt failed safely."
                         : "The last native Microsoft setup attempt completed."),
                 native.Stage.ToString(),
+                native.FailureSubstage.ToString(),
                 native.FailureCategory.ToString(),
                 native.SafeCode,
                 details?.PowerShellExceptionType,
@@ -397,6 +410,7 @@ public sealed class RelayDiagnosticsService
                         ? "Persisted setup state records a completed activation."
                         : "Persisted setup progress is available, but it is not a live result."),
                 setupState.Step.ToString(),
+                NativeSetupFailureSubstage.None.ToString(),
                 setupState.Lifecycle.ToString(),
                 null, null, null, null, null);
         }
@@ -407,7 +421,7 @@ public sealed class RelayDiagnosticsService
                 now,
                 DiagnosticEvidenceSource.Runtime,
                 "No retained Microsoft setup result is available."),
-            "Not run", "None", null, null, null, null, null);
+            "Not run", NativeSetupFailureSubstage.None.ToString(), "None", null, null, null, null, null);
     }
 
     private StorageDiagnosticSnapshot ReadStorage(

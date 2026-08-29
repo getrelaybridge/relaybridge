@@ -104,6 +104,7 @@
         <CardHeading Id="setup-heading" Title="Last Microsoft setup result" Evidence="Snapshot.Setup.Evidence" />
         <dl class="stacked-details">
             <div><dt>Stage</dt><dd>@Snapshot.Setup.Stage</dd></div>
+            <div><dt>Substage</dt><dd>@Snapshot.Setup.Substage</dd></div>
             <div><dt>Category</dt><dd>@Snapshot.Setup.Category</dd></div>
             <div><dt>Safe code</dt><dd>@(Snapshot.Setup.SafeCode ?? "None")</dd></div>
             @if (Snapshot.Setup.PowerShellExceptionType is not null)
