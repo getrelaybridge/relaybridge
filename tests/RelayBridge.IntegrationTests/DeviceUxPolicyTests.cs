@@ -344,6 +344,26 @@ public sealed class DeviceUxPolicyTests
         Assert.DoesNotContain("@onclick=\"RepairAsync\">Verify connection", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Step5_ui_exposes_bounded_page_scoped_automatic_verification_status_and_controls()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(), "src", "RelayBridge.Host", "Components", "Pages", "MicrosoftSetup.razor"));
+
+        Assert.Contains("Waiting for authorization", source, StringComparison.Ordinal);
+        Assert.Contains("Automatic verification", source, StringComparison.Ordinal);
+        Assert.Contains("Attempt", source, StringComparison.Ordinal);
+        Assert.Contains("Last check", source, StringComparison.Ordinal);
+        Assert.Contains("Last result", source, StringComparison.Ordinal);
+        Assert.Contains("Next check", source, StringComparison.Ordinal);
+        Assert.Contains("Elapsed", source, StringComparison.Ordinal);
+        Assert.Contains("Check now", source, StringComparison.Ordinal);
+        Assert.Contains("Stop automatic checks", source, StringComparison.Ordinal);
+        Assert.Contains("_pageLifetime.Token", source, StringComparison.Ordinal);
+        Assert.Contains("HostLifetime.ApplicationStopping", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("BackgroundService", source, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("0.0.0.0")]
     [InlineData("::")]

@@ -16,6 +16,7 @@
 @inject NativeMicrosoftSetupServer NativeSetupServer
 @inject TimeProvider Clock
 @inject IJSRuntime JavaScript
+@inject IHostApplicationLifetime HostLifetime
 
 <PageTitle>Microsoft 365 setup · RelayBridge</PageTitle>
 
@@ -307,9 +308,28 @@
                 <h1>Test Exchange Online</h1>
                 <p class="lead">RelayBridge will use the proven production SMTP OAuth provider and send a small verification message to the selected sender mailbox.</p>
                 <p class="guidance">If Exchange initially rejects application authentication after recent permission changes, RelayBridge will retry authentication briefly; this does not assume propagation is the cause.</p>
-                @StatusRows(("Microsoft identity", State.IdentityValidated), ("Exchange SMTP", false), ("Sender authorization", false))
+                @StatusValues(
+                    ("Microsoft identity", State.IdentityValidated ? "Ready" : "Waiting"),
+                    ("Exchange SMTP", ExchangeVerificationStatus),
+                    ("Sender authorization", SenderVerificationStatus))
+                @if (_automaticVerificationSnapshot is not null)
+                {
+                    <dl class="verification-list" aria-label="Automatic Exchange verification status">
+                        <div><dt>Automatic verification</dt><dd>@_automaticVerificationSnapshot.State</dd></div>
+                        <div><dt>Attempt</dt><dd>@_automaticVerificationSnapshot.AttemptCount of @_automaticVerificationSnapshot.MaximumAttempts</dd></div>
+                        <div><dt>Last check</dt><dd>@FormatTimestamp(_automaticVerificationSnapshot.LastCheckUtc)</dd></div>
+                        <div><dt>Last result</dt><dd>@(_automaticVerificationSnapshot.LastResult ?? "Waiting for first scheduled check")</dd></div>
+                        <div><dt>Next check</dt><dd>@FormatTimestamp(_automaticVerificationSnapshot.NextCheckUtc)</dd></div>
+                        <div><dt>Elapsed</dt><dd>@FormatElapsed(_automaticVerificationSnapshot.Elapsed)</dd></div>
+                    </dl>
+                }
                 <div class="actions">
-                    <button class="button primary" disabled="@_busy" @onclick="VerifyExchangeAsync">Test secure connection</button>
+                    <button class="button primary" disabled="@(_busy || AutomaticAttemptRunning)" @onclick="VerifyExchangeStepAsync">Test secure connection</button>
+                    @if (_automaticVerificationSnapshot?.State == Step5AutomaticVerificationState.Active)
+                    {
+                        <button class="button secondary" disabled="@AutomaticAttemptRunning" @onclick="CheckAutomaticVerificationNowAsync">Check now</button>
+                        <button class="button secondary" @onclick="StopAutomaticVerificationAsync">Stop automatic checks</button>
+                    }
                     <button class="button secondary" @onclick="BackAsync">Back</button>
                 </div>
                 break;
@@ -413,12 +433,28 @@
     private bool _busy;
     private bool _hasActiveConfiguration;
     private CancellationTokenSource? _nativeMonitorCancellation;
+    private readonly CancellationTokenSource _pageLifetime = new();
+    private Step5AutomaticVerificationSession? _automaticVerification;
+    private Step5AutomaticVerificationSnapshot? _automaticVerificationSnapshot;
     private string? _activeConfigurationFingerprint;
     private MicrosoftRuntimeReadiness RuntimeReadiness => MicrosoftRuntimeReadinessPolicy.Evaluate(
         _hasActiveConfiguration,
         _activeConfigurationFingerprint,
         MicrosoftIdentity,
         ExchangeDelivery);
+    private bool AutomaticAttemptRunning => _automaticVerificationSnapshot?.AttemptRunning == true;
+    private string ExchangeVerificationStatus => _automaticVerificationSnapshot switch
+    {
+        { State: Step5AutomaticVerificationState.Completed } => "Authenticated",
+        { LastResult: "Authentication · SMTP 535" } => "Waiting for authorization",
+        { State: Step5AutomaticVerificationState.Active } => "Waiting for authorization",
+        { State: Step5AutomaticVerificationState.Stopped } => "Not verified",
+        _ => "Waiting",
+    };
+    private string SenderVerificationStatus => _automaticVerificationSnapshot?.State ==
+        Step5AutomaticVerificationState.Completed
+            ? "Confirmed"
+            : "Waiting";
 
     private string PublicCertificateUrl => State.Certificate is null
         ? "#"
@@ -565,16 +601,118 @@
 
     private Task VerifyIdentityAsync() => RunOperationAsync(Setup.VerifyIdentityAsync);
 
-    private Task VerifyExchangeAsync() => RunOperationAsync(Setup.VerifyExchangeAsync);
+    private async Task VerifyExchangeStepAsync()
+    {
+        await DisposeAutomaticVerificationAsync(clearSnapshot: true);
+        MicrosoftSetupOperationResult? result = null;
+        await RunActionAsync(async () =>
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(12));
+            result = await Setup.VerifyExchangeAsync(timeout.Token);
+            ApplyOperationResult(result);
+        });
+
+        if (result?.AutomaticVerificationEligible == true &&
+            result.State.Step == MicrosoftSetupStep.VerifyExchange)
+        {
+            StartAutomaticVerification(result);
+        }
+    }
+
+    private void StartAutomaticVerification(MicrosoftSetupOperationResult initialResult)
+    {
+        NativeMicrosoftCandidateIdentity candidate;
+        try
+        {
+            candidate = Setup.CaptureStep5VerificationCandidate(initialResult.State);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or MicrosoftSetupConcurrencyException)
+        {
+            _notice = exception.Message;
+            _noticeIsError = true;
+            return;
+        }
+
+        _automaticVerification = new Step5AutomaticVerificationSession(
+            candidate,
+            initialResult,
+            Setup.IsStep5VerificationCandidateCurrent,
+            Setup.VerifyExchangeAutomaticallyAsync,
+            Clock,
+            OnAutomaticVerificationUpdatedAsync,
+            _pageLifetime.Token,
+            HostLifetime.ApplicationStopping);
+        _automaticVerificationSnapshot = _automaticVerification.Snapshot;
+        _automaticVerification.Start();
+    }
+
+    private async Task OnAutomaticVerificationUpdatedAsync(
+        Step5AutomaticVerificationSnapshot snapshot)
+    {
+        await InvokeAsync(() =>
+        {
+            _automaticVerificationSnapshot = snapshot;
+            State = Setup.GetState();
+            var activeConfiguration = Database.GetActiveMicrosoftConfiguration();
+            _hasActiveConfiguration = activeConfiguration?.AuthorizedSender is not null;
+            _activeConfigurationFingerprint = activeConfiguration?.Fingerprint;
+            _notice = snapshot.Message;
+            _noticeIsError = snapshot.State == Step5AutomaticVerificationState.Stopped;
+            if (!string.IsNullOrWhiteSpace(snapshot.LastResult))
+            {
+                _technicalCode = snapshot.LastResult;
+            }
+
+            if (!string.IsNullOrWhiteSpace(snapshot.CorrelationId))
+            {
+                _correlationId = snapshot.CorrelationId;
+            }
+
+            _technicalTimestamp = snapshot.LastCheckUtc;
+            SyncFields();
+            StateHasChanged();
+        });
+    }
+
+    private Task CheckAutomaticVerificationNowAsync()
+    {
+        var result = _automaticVerification?.CheckNow() ?? Step5CheckNowResult.Inactive;
+        _notice = result switch
+        {
+            Step5CheckNowResult.Scheduled => "Checking Exchange Online now.",
+            Step5CheckNowResult.AlreadyRunning => "An Exchange verification is already in progress.",
+            _ => "Automatic Exchange verification is not active.",
+        };
+        _noticeIsError = false;
+        return Task.CompletedTask;
+    }
+
+    private async Task StopAutomaticVerificationAsync()
+    {
+        if (_automaticVerification is null)
+        {
+            return;
+        }
+
+        await _automaticVerification.StopAsync();
+        _automaticVerificationSnapshot = _automaticVerification.Snapshot;
+        await _automaticVerification.DisposeAsync();
+        _automaticVerification = null;
+    }
 
     private Task VerifyActiveConnectionAsync() => RunOperationAsync(Setup.VerifyActiveConnectionAsync);
 
     private Task SendTestAsync() => RunOperationAsync(token => Setup.SendTestMessageAsync(_testRecipient, token));
 
-    private Task BackAsync() => RunAsync(() => Task.FromResult(Setup.Back()));
+    private async Task BackAsync()
+    {
+        await DisposeAutomaticVerificationAsync(clearSnapshot: true);
+        await RunAsync(() => Task.FromResult(Setup.Back()));
+    }
 
     private async Task CancelAsync()
     {
+        await DisposeAutomaticVerificationAsync(clearSnapshot: true);
         await NativeSetup.CancelAsync();
         await RunAsync(() => Task.FromResult(Setup.Cancel()));
     }
@@ -601,17 +739,22 @@
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(12));
             var result = await operation(timeout.Token);
-            State = result.State;
-            var activeConfiguration = Database.GetActiveMicrosoftConfiguration();
-            _hasActiveConfiguration = activeConfiguration?.AuthorizedSender is not null;
-            _activeConfigurationFingerprint = activeConfiguration?.Fingerprint;
-            _notice = result.Message;
-            _noticeIsError = !result.Succeeded;
-            _technicalCode = result.TechnicalCode;
-            _correlationId = result.CorrelationId;
-            _technicalTimestamp = Clock.GetUtcNow();
-            SyncFields();
+            ApplyOperationResult(result);
         });
+    }
+
+    private void ApplyOperationResult(MicrosoftSetupOperationResult result)
+    {
+        State = result.State;
+        var activeConfiguration = Database.GetActiveMicrosoftConfiguration();
+        _hasActiveConfiguration = activeConfiguration?.AuthorizedSender is not null;
+        _activeConfigurationFingerprint = activeConfiguration?.Fingerprint;
+        _notice = result.Message;
+        _noticeIsError = !result.Succeeded;
+        _technicalCode = result.TechnicalCode;
+        _correlationId = result.CorrelationId;
+        _technicalTimestamp = Clock.GetUtcNow();
+        SyncFields();
     }
 
     private async Task RunAsync(Func<Task<MicrosoftSetupState>> action)
@@ -678,6 +821,12 @@
 
     private string ProgressSymbol(MicrosoftSetupStep step) => step < State.Step ? "✓" : ((int)step + 1).ToString();
 
+    private static string FormatTimestamp(DateTimeOffset? timestamp) => timestamp?.ToString("u") ?? "Not available";
+
+    private static string FormatElapsed(TimeSpan elapsed) => elapsed.TotalMinutes >= 1
+        ? $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds}s"
+        : $"{elapsed.Seconds}s";
+
     private RenderFragment StatusRows(params (string Label, bool Ready)[] rows) => builder =>
     {
         builder.OpenElement(0, "dl");
@@ -697,10 +846,45 @@
         builder.CloseElement();
     };
 
-    public ValueTask DisposeAsync()
+    private RenderFragment StatusValues(params (string Label, string Value)[] rows) => builder =>
     {
+        builder.OpenElement(0, "dl");
+        builder.AddAttribute(1, "class", "verification-list");
+        var sequence = 2;
+        foreach (var row in rows)
+        {
+            builder.OpenElement(sequence++, "div");
+            builder.OpenElement(sequence++, "dt");
+            builder.AddContent(sequence++, row.Label);
+            builder.CloseElement();
+            builder.OpenElement(sequence++, "dd");
+            builder.AddContent(sequence++, row.Value);
+            builder.CloseElement();
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+    };
+
+    private async Task DisposeAutomaticVerificationAsync(bool clearSnapshot)
+    {
+        if (_automaticVerification is not null)
+        {
+            await _automaticVerification.DisposeAsync();
+            _automaticVerification = null;
+        }
+
+        if (clearSnapshot)
+        {
+            _automaticVerificationSnapshot = null;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await DisposeAutomaticVerificationAsync(clearSnapshot: false);
+        _pageLifetime.Cancel();
         _nativeMonitorCancellation?.Cancel();
         _nativeMonitorCancellation?.Dispose();
-        return ValueTask.CompletedTask;
+        _pageLifetime.Dispose();
     }
 }

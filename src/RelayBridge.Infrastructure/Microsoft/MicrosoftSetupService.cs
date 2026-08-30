@@ -588,6 +588,86 @@ public sealed class MicrosoftSetupService
             return Failure(state, "Verify Microsoft identity before testing Exchange SMTP.");
         }
 
+        NativeMicrosoftCandidateIdentity expected;
+        try
+        {
+            expected = CreateStep5VerificationCandidate(state);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            return Failure(state, exception.Message);
+        }
+
+        return await VerifyExchangeAsync(
+            expected,
+            allowBriefPropagationRetry: state.ExchangeResultValidated,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public NativeMicrosoftCandidateIdentity CaptureStep5VerificationCandidate(
+        CancellationToken cancellationToken = default)
+    {
+        return CreateStep5VerificationCandidate(GetState(cancellationToken));
+    }
+
+    public NativeMicrosoftCandidateIdentity CaptureStep5VerificationCandidate(
+        MicrosoftSetupState verifiedState,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(verifiedState);
+        var expected = CreateStep5VerificationCandidate(verifiedState);
+        if (!IsStep5VerificationCandidateCurrent(expected, cancellationToken))
+        {
+            throw new MicrosoftSetupConcurrencyException();
+        }
+
+        return expected;
+    }
+
+    public bool IsStep5VerificationCandidateCurrent(
+        NativeMicrosoftCandidateIdentity expected,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        try
+        {
+            var current = CreateStep5VerificationCandidate(GetState(cancellationToken));
+            return current.ActivationId == expected.ActivationId &&
+                current.Revision == expected.Revision &&
+                current.Mode == expected.Mode &&
+                string.Equals(
+                    current.ConfigurationFingerprint,
+                    expected.ConfigurationFingerprint,
+                    StringComparison.Ordinal) &&
+                string.Equals(current.SenderMailbox, expected.SenderMailbox, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    public Task<MicrosoftSetupOperationResult> VerifyExchangeAutomaticallyAsync(
+        NativeMicrosoftCandidateIdentity expected,
+        CancellationToken cancellationToken = default)
+    {
+        return VerifyExchangeAsync(expected, allowBriefPropagationRetry: false, cancellationToken);
+    }
+
+    private async Task<MicrosoftSetupOperationResult> VerifyExchangeAsync(
+        NativeMicrosoftCandidateIdentity expected,
+        bool allowBriefPropagationRetry,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        var state = GetState(cancellationToken);
+        if (!IsStep5VerificationCandidateCurrent(expected, cancellationToken))
+        {
+            return Failure(
+                state,
+                "The Microsoft setup candidate changed. Review the current setup state before verifying again.");
+        }
+
         MicrosoftIdentityConfiguration configuration;
         try
         {
@@ -599,13 +679,8 @@ public sealed class MicrosoftSetupService
         }
 
         var candidateTokenProvider = new CandidateTokenProvider(_tokens, configuration);
-        if (state.ActivationId is null || state.ActivationId == Guid.Empty)
-        {
-            return Failure(state, "The candidate Microsoft configuration has no activation identity. Restart setup and try again.");
-        }
-
         var configurationFingerprint = MicrosoftConfigurationFingerprint.CreateRuntimeEvidenceKey(
-            state.ActivationId.Value,
+            expected.ActivationId,
             MicrosoftConfigurationFingerprint.Create(
             configuration,
             state.SenderMailbox));
@@ -617,7 +692,7 @@ public sealed class MicrosoftSetupService
                 configuration,
                 configurationFingerprint,
                 token),
-            state.ExchangeResultValidated,
+            allowBriefPropagationRetry,
             cancellationToken).ConfigureAwait(false);
         var result = verification.Result;
         if (result.Outcome != DeliveryOutcome.Success)
@@ -626,7 +701,8 @@ public sealed class MicrosoftSetupService
                 state,
                 PlainExchangeMessage(result.ErrorCategory, verification.AttemptCount > 1),
                 ExchangeTechnicalCode(result),
-                result.CorrelationId.ToString("D"));
+                result.CorrelationId.ToString("D"),
+                IsPossibleExchangeAuthorizationPropagation(result));
         }
 
         state = state with
@@ -637,11 +713,21 @@ public sealed class MicrosoftSetupService
             UpdatedUtc = _timeProvider.GetUtcNow(),
             Revision = checked(state.Revision + 1),
         };
-        _database.ActivateMicrosoftConfiguration(
-            configuration,
-            state.SenderMailbox!,
-            state,
-            cancellationToken);
+        try
+        {
+            _persistenceHooks?.BeforeActivationPersistence?.Invoke();
+            _database.ActivateMicrosoftConfigurationConditional(
+                configuration,
+                state.SenderMailbox!,
+                state,
+                expected,
+                cancellationToken);
+        }
+        catch (MicrosoftSetupConcurrencyException exception)
+        {
+            return Failure(GetState(cancellationToken), exception.Message);
+        }
+
         _queueDeliveryActivation.Activate();
         return new MicrosoftSetupOperationResult(
             true,
@@ -807,6 +893,25 @@ public sealed class MicrosoftSetupService
             state.Certificate);
     }
 
+    private static NativeMicrosoftCandidateIdentity CreateStep5VerificationCandidate(
+        MicrosoftSetupState state)
+    {
+        if (state.Lifecycle != MicrosoftSetupCandidateLifecycle.Active ||
+            state.Step != MicrosoftSetupStep.VerifyExchange ||
+            !state.EntraResultValidated || !state.ExchangeResultValidated ||
+            !state.IdentityValidated || state.ExchangeValidated ||
+            state.Certificate is null || state.TenantId is null || state.ClientId is null ||
+            state.ServicePrincipalObjectId is null || string.IsNullOrWhiteSpace(state.SenderMailbox) ||
+            state.ActivationId is null || state.ActivationId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "The candidate Microsoft configuration is not ready for Exchange verification.");
+        }
+
+        _ = CreateCandidateConfiguration(state);
+        return CreateNativeCandidateIdentity(state);
+    }
+
     private static bool IsSameActiveConfiguration(
         MicrosoftSetupState? completedState,
         ActiveMicrosoftConfiguration? activeConfiguration)
@@ -896,9 +1001,16 @@ public sealed class MicrosoftSetupService
         MicrosoftSetupState state,
         string message,
         string? technicalCode = null,
-        string? correlationId = null)
+        string? correlationId = null,
+        bool automaticVerificationEligible = false)
     {
-        return new MicrosoftSetupOperationResult(false, message, state, technicalCode, correlationId);
+        return new MicrosoftSetupOperationResult(
+            false,
+            message,
+            state,
+            technicalCode,
+            correlationId,
+            automaticVerificationEligible);
     }
 
     internal async Task<SetupSmtpVerificationResult> VerifySetupSmtpWithBoundedPropagationRetryAsync(
