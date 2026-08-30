@@ -318,6 +318,37 @@ public sealed class RelayDatabase
         MicrosoftSetupState setupState,
         CancellationToken cancellationToken = default)
     {
+        ActivateMicrosoftConfigurationCore(
+            configuration,
+            authorizedSender,
+            setupState,
+            expected: null,
+            cancellationToken);
+    }
+
+    public void ActivateMicrosoftConfigurationConditional(
+        MicrosoftIdentityConfiguration configuration,
+        string authorizedSender,
+        MicrosoftSetupState setupState,
+        NativeMicrosoftCandidateIdentity expected,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        ActivateMicrosoftConfigurationCore(
+            configuration,
+            authorizedSender,
+            setupState,
+            expected,
+            cancellationToken);
+    }
+
+    private void ActivateMicrosoftConfigurationCore(
+        MicrosoftIdentityConfiguration configuration,
+        string authorizedSender,
+        MicrosoftSetupState setupState,
+        NativeMicrosoftCandidateIdentity? expected,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentException.ThrowIfNullOrWhiteSpace(authorizedSender);
         ArgumentNullException.ThrowIfNull(setupState);
@@ -329,7 +360,21 @@ public sealed class RelayDatabase
         EnsureInitialized(cancellationToken);
 
         using var connection = OpenConnectionCore();
-        using var transaction = connection.BeginTransaction();
+        using var transaction = connection.BeginTransaction(deferred: expected is null);
+        if (expected is not null)
+        {
+            var current = ReadMicrosoftSetupState(connection, transaction);
+            EnsureCandidateMatches(current, expected);
+            if (setupState.ActivationId != expected.ActivationId ||
+                setupState.Revision != checked(expected.Revision + 1) ||
+                setupState.Step != MicrosoftSetupStep.TestMessage ||
+                !setupState.ExchangeValidated ||
+                !string.Equals(setupState.SenderMailbox, expected.SenderMailbox, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new MicrosoftSetupConcurrencyException();
+            }
+        }
+
         using (var identityCommand = connection.CreateCommand())
         {
             identityCommand.Transaction = transaction;

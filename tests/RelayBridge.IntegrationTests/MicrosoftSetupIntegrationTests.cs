@@ -5,10 +5,12 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using RelayBridge.Core.Microsoft;
 using RelayBridge.Core.Queue;
+using RelayBridge.Host.Components.Pages;
 using RelayBridge.Host.Services;
 using RelayBridge.Infrastructure.Microsoft;
 using RelayBridge.Infrastructure.Queue;
@@ -747,6 +749,7 @@ public sealed class MicrosoftSetupIntegrationTests
         var result = await context.Setup.VerifyExchangeAsync();
 
         Assert.False(result.Succeeded);
+        Assert.True(result.AutomaticVerificationEligible);
         Assert.Equal("Authentication · SMTP 535", result.TechnicalCode);
         Assert.Contains("propagation is not certain", result.Message, StringComparison.Ordinal);
         Assert.Contains("retried briefly", result.Message, StringComparison.Ordinal);
@@ -807,6 +810,7 @@ public sealed class MicrosoftSetupIntegrationTests
         var result = await context.Setup.VerifyExchangeAsync();
 
         Assert.False(result.Succeeded);
+        Assert.False(result.AutomaticVerificationEligible);
         Assert.Equal(1, context.Server.ConnectionCount);
         Assert.Contains("SMTP 454", result.TechnicalCode, StringComparison.OrdinalIgnoreCase);
     }
@@ -824,6 +828,7 @@ public sealed class MicrosoftSetupIntegrationTests
         var result = await context.Setup.VerifyExchangeAsync();
 
         Assert.False(result.Succeeded);
+        Assert.False(result.AutomaticVerificationEligible);
         Assert.Equal(1, context.Server.ConnectionCount);
     }
 
@@ -845,6 +850,324 @@ public sealed class MicrosoftSetupIntegrationTests
             command.StartsWith("MAIL", StringComparison.OrdinalIgnoreCase) ||
             command.StartsWith("RCPT", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(command, "DATA", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Automatic_step5_session_retries_exact_535_then_sends_one_verification_message_and_activates()
+    {
+        await using var context = await SetupTestContext.CreateAsync(new FakeExchangeScenario
+        {
+            AuthResults =
+            [
+                "535 5.7.3 Authentication unsuccessful",
+                "535 5.7.3 Authentication unsuccessful",
+                "535 5.7.3 Authentication unsuccessful",
+                "535 5.7.3 Authentication unsuccessful",
+                "535 5.7.3 Authentication unsuccessful",
+                "235 2.7.0 Authentication successful",
+            ],
+        });
+        PrepareCandidate(context, Guid.NewGuid(), Guid.NewGuid());
+        Assert.True((await context.Setup.VerifyIdentityAsync()).Succeeded);
+        var initial = await context.Setup.VerifyExchangeAsync();
+        Assert.False(initial.Succeeded);
+        Assert.True(initial.AutomaticVerificationEligible);
+        Assert.Equal(4, context.Server.ConnectionCount);
+
+        var delay = new ControlledStep5Delay();
+        await using var session = CreateAutomaticSession(context, delay);
+        session.Start();
+
+        await delay.ReleaseNextAsync();
+        await WaitUntilAsync(
+            () => session.Snapshot.AttemptCount == 1 && !session.Snapshot.AttemptRunning,
+            TimeSpan.FromSeconds(5));
+        await delay.ReleaseNextAsync();
+        await WaitUntilAsync(
+            () => session.Snapshot.State == Step5AutomaticVerificationState.Completed,
+            TimeSpan.FromSeconds(5));
+
+        Assert.Equal(2, session.Snapshot.AttemptCount);
+        Assert.Equal(6, context.Server.ConnectionCount);
+        Assert.Equal(1, context.Server.Commands.Count(command =>
+            command.StartsWith("MAIL FROM:", StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal(1, context.Server.Commands.Count(command =>
+            command.StartsWith("RCPT TO:", StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal(1, context.Server.Commands.Count(command =>
+            string.Equals(command, "DATA", StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal(MicrosoftSetupStep.TestMessage, context.Setup.GetState().Step);
+        Assert.Equal(MicrosoftSetupCandidateLifecycle.Activated, context.Setup.GetState().Lifecycle);
+        Assert.NotNull(context.Database.GetActiveMicrosoftConfiguration());
+    }
+
+    [Fact]
+    public async Task Automatic_step5_session_stops_at_twelve_attempts_without_sending_mail()
+    {
+        await using var context = await SetupTestContext.CreateAsync(new FakeExchangeScenario
+        {
+            AuthResult = "535 5.7.3 Authentication unsuccessful",
+        });
+        PrepareCandidate(context, Guid.NewGuid(), Guid.NewGuid());
+        Assert.True((await context.Setup.VerifyIdentityAsync()).Succeeded);
+        var initial = await context.Setup.VerifyExchangeAsync();
+        Assert.True(initial.AutomaticVerificationEligible);
+
+        var delay = new ControlledStep5Delay();
+        await using var session = CreateAutomaticSession(context, delay);
+        session.Start();
+        for (var attempt = 1; attempt <= 12; attempt++)
+        {
+            await delay.ReleaseNextAsync();
+            await WaitUntilAsync(
+                () => session.Snapshot.AttemptCount >= attempt && !session.Snapshot.AttemptRunning,
+                TimeSpan.FromSeconds(5));
+        }
+
+        await WaitUntilAsync(
+            () => session.Snapshot.State == Step5AutomaticVerificationState.Stopped,
+            TimeSpan.FromSeconds(5));
+        Assert.Equal(12, session.Snapshot.AttemptCount);
+        Assert.Equal(Step5AutomaticVerificationSession.LimitMessage, session.Snapshot.Message);
+        Assert.Equal(16, context.Server.ConnectionCount);
+        Assert.DoesNotContain(context.Server.Commands, command =>
+            command.StartsWith("MAIL", StringComparison.OrdinalIgnoreCase) ||
+            command.StartsWith("RCPT", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(command, "DATA", StringComparison.OrdinalIgnoreCase));
+        Assert.Null(context.Database.GetActiveMicrosoftConfiguration());
+    }
+
+    [Fact]
+    public async Task Automatic_step5_wait_rechecks_candidate_before_network_use()
+    {
+        await using var context = await SetupTestContext.CreateAsync(new FakeExchangeScenario
+        {
+            AuthResult = "535 5.7.3 Authentication unsuccessful",
+        });
+        PrepareCandidate(context, Guid.NewGuid(), Guid.NewGuid());
+        Assert.True((await context.Setup.VerifyIdentityAsync()).Succeeded);
+        Assert.True((await context.Setup.VerifyExchangeAsync()).AutomaticVerificationEligible);
+
+        var delay = new ControlledStep5Delay();
+        await using var session = CreateAutomaticSession(context, delay);
+        session.Start();
+        await delay.WaitUntilPendingAsync();
+        context.Setup.Begin(MicrosoftSetupMode.NewApplication);
+        await delay.ReleaseNextAsync();
+        await WaitUntilAsync(
+            () => session.Snapshot.State == Step5AutomaticVerificationState.Stopped,
+            TimeSpan.FromSeconds(5));
+
+        Assert.Equal(0, session.Snapshot.AttemptCount);
+        Assert.Equal(4, context.Server.ConnectionCount);
+        Assert.Null(context.Database.GetActiveMicrosoftConfiguration());
+    }
+
+    [Fact]
+    public async Task Automatic_step5_session_cannot_adopt_replacement_after_initial_result()
+    {
+        await using var context = await SetupTestContext.CreateAsync(new FakeExchangeScenario
+        {
+            AuthResult = "535 5.7.3 Authentication unsuccessful",
+        });
+        PrepareCandidate(context, Guid.NewGuid(), Guid.NewGuid());
+        Assert.True((await context.Setup.VerifyIdentityAsync()).Succeeded);
+        var initialResult = await context.Setup.VerifyExchangeAsync();
+        Assert.True(initialResult.AutomaticVerificationEligible);
+
+        context.Setup.Begin(MicrosoftSetupMode.NewApplication);
+
+        Assert.Throws<MicrosoftSetupConcurrencyException>(() =>
+            context.Setup.CaptureStep5VerificationCandidate(initialResult.State));
+        Assert.Equal(4, context.Server.ConnectionCount);
+        Assert.Null(context.Database.GetActiveMicrosoftConfiguration());
+    }
+
+    [Fact]
+    public async Task Disposing_automatic_step5_session_cancels_pending_delay_and_future_attempts()
+    {
+        await using var context = await SetupTestContext.CreateAsync(new FakeExchangeScenario
+        {
+            AuthResult = "535 5.7.3 Authentication unsuccessful",
+        });
+        PrepareCandidate(context, Guid.NewGuid(), Guid.NewGuid());
+        Assert.True((await context.Setup.VerifyIdentityAsync()).Succeeded);
+        Assert.True((await context.Setup.VerifyExchangeAsync()).AutomaticVerificationEligible);
+
+        var delay = new ControlledStep5Delay();
+        var session = CreateAutomaticSession(context, delay);
+        session.Start();
+        await delay.WaitUntilPendingAsync();
+        await session.DisposeAsync();
+
+        Assert.Equal(4, context.Server.ConnectionCount);
+        Assert.Equal(0, session.Snapshot.AttemptCount);
+    }
+
+    [Fact]
+    public async Task Administrator_stop_cancels_only_automatic_checks_and_preserves_candidate()
+    {
+        await using var context = await SetupTestContext.CreateAsync(new FakeExchangeScenario
+        {
+            AuthResult = "535 5.7.3 Authentication unsuccessful",
+        });
+        PrepareCandidate(context, Guid.NewGuid(), Guid.NewGuid());
+        Assert.True((await context.Setup.VerifyIdentityAsync()).Succeeded);
+        Assert.True((await context.Setup.VerifyExchangeAsync()).AutomaticVerificationEligible);
+
+        var delay = new ControlledStep5Delay();
+        await using var session = CreateAutomaticSession(context, delay);
+        session.Start();
+        await delay.WaitUntilPendingAsync();
+        await session.StopAsync();
+
+        Assert.Equal(Step5AutomaticVerificationState.Stopped, session.Snapshot.State);
+        Assert.Contains("candidate was not cancelled", session.Snapshot.Message, StringComparison.Ordinal);
+        Assert.Equal(0, session.Snapshot.AttemptCount);
+        Assert.Equal(4, context.Server.ConnectionCount);
+        Assert.Equal(MicrosoftSetupStep.VerifyExchange, context.Setup.GetState().Step);
+        Assert.Equal(MicrosoftSetupCandidateLifecycle.Active, context.Setup.GetState().Lifecycle);
+    }
+
+    [Fact]
+    public async Task Check_now_is_coalesced_while_step5_attempt_is_running_and_consumes_one_attempt()
+    {
+        await using var context = await SetupTestContext.CreateAsync();
+        PrepareCandidate(context, Guid.NewGuid(), Guid.NewGuid());
+        Assert.True((await context.Setup.VerifyIdentityAsync()).Succeeded);
+        var candidate = context.Setup.CaptureStep5VerificationCandidate();
+        var delay = new ControlledStep5Delay();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var session = new Step5AutomaticVerificationSession(
+            candidate,
+            EligibleAutomaticFailure(candidate.CapturedState),
+            (_, _) => true,
+            async (_, cancellationToken) =>
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(cancellationToken);
+                return EligibleAutomaticFailure(candidate.CapturedState);
+            },
+            TimeProvider.System,
+            _ => Task.CompletedTask,
+            CancellationToken.None,
+            CancellationToken.None,
+            Step5AutomaticVerificationOptions.Production,
+            delay.DelayAsync);
+        session.Start();
+        await delay.WaitUntilPendingAsync();
+
+        Assert.Equal(Step5CheckNowResult.Scheduled, session.CheckNow());
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(Step5CheckNowResult.AlreadyRunning, session.CheckNow());
+        Assert.Equal(1, session.Snapshot.AttemptCount);
+        release.TrySetResult();
+        await WaitUntilAsync(
+            () => session.Snapshot.AttemptCount == 1 && !session.Snapshot.AttemptRunning,
+            TimeSpan.FromSeconds(5));
+    }
+
+    [Theory]
+    [InlineData("DNS")]
+    [InlineData("Network · TCP")]
+    [InlineData("TLS")]
+    [InlineData("Timeout")]
+    [InlineData("Protocol")]
+    [InlineData("Authentication · SMTP 550")]
+    [InlineData("CertificateInvalid")]
+    public async Task Noneligible_step5_failure_stops_automatic_session(string safeCode)
+    {
+        await using var context = await SetupTestContext.CreateAsync();
+        PrepareCandidate(context, Guid.NewGuid(), Guid.NewGuid());
+        Assert.True((await context.Setup.VerifyIdentityAsync()).Succeeded);
+        var candidate = context.Setup.CaptureStep5VerificationCandidate();
+        var delay = new ControlledStep5Delay();
+        await using var session = new Step5AutomaticVerificationSession(
+            candidate,
+            EligibleAutomaticFailure(candidate.CapturedState),
+            (_, _) => true,
+            (_, _) => Task.FromResult(new MicrosoftSetupOperationResult(
+                false,
+                "Verification failed safely.",
+                candidate.CapturedState,
+                safeCode,
+                Guid.NewGuid().ToString("D"),
+                AutomaticVerificationEligible: false)),
+            TimeProvider.System,
+            _ => Task.CompletedTask,
+            CancellationToken.None,
+            CancellationToken.None,
+            Step5AutomaticVerificationOptions.Production,
+            delay.DelayAsync);
+        session.Start();
+
+        await delay.ReleaseNextAsync();
+        await WaitUntilAsync(
+            () => session.Snapshot.State == Step5AutomaticVerificationState.Stopped,
+            TimeSpan.FromSeconds(5));
+        Assert.Equal(1, session.Snapshot.AttemptCount);
+        Assert.Equal(safeCode, session.Snapshot.LastResult);
+    }
+
+    [Fact]
+    public async Task Automatic_step5_session_stops_at_elapsed_duration_before_verifying()
+    {
+        await using var context = await SetupTestContext.CreateAsync();
+        PrepareCandidate(context, Guid.NewGuid(), Guid.NewGuid());
+        Assert.True((await context.Setup.VerifyIdentityAsync()).Succeeded);
+        var candidate = context.Setup.CaptureStep5VerificationCandidate();
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-08-30T00:00:00Z"));
+        var delay = new ControlledStep5Delay();
+        var verificationCount = 0;
+        await using var session = new Step5AutomaticVerificationSession(
+            candidate,
+            EligibleAutomaticFailure(candidate.CapturedState),
+            (_, _) => true,
+            (_, _) =>
+            {
+                verificationCount++;
+                return Task.FromResult(EligibleAutomaticFailure(candidate.CapturedState));
+            },
+            time,
+            _ => Task.CompletedTask,
+            CancellationToken.None,
+            CancellationToken.None,
+            Step5AutomaticVerificationOptions.Production,
+            delay.DelayAsync);
+        session.Start();
+        await delay.WaitUntilPendingAsync();
+        time.Advance(TimeSpan.FromMinutes(60));
+        await delay.ReleaseNextAsync();
+        await WaitUntilAsync(
+            () => session.Snapshot.State == Step5AutomaticVerificationState.Stopped,
+            TimeSpan.FromSeconds(5));
+
+        Assert.Equal(0, verificationCount);
+        Assert.Equal(0, session.Snapshot.AttemptCount);
+        Assert.Equal(Step5AutomaticVerificationSession.LimitMessage, session.Snapshot.Message);
+    }
+
+    [Fact]
+    public async Task Candidate_replacement_during_successful_step5_transaction_cannot_activate_replacement()
+    {
+        SetupTestContext? context = null;
+        var hooks = new MicrosoftSetupPersistenceHooks
+        {
+            BeforeActivationPersistence = () => context!.Setup.Begin(MicrosoftSetupMode.NewApplication),
+        };
+        await using var created = await SetupTestContext.CreateAsync(persistenceHooks: hooks);
+        context = created;
+        PrepareCandidate(context, Guid.NewGuid(), Guid.NewGuid());
+        Assert.True((await context.Setup.VerifyIdentityAsync()).Succeeded);
+
+        var result = await context.Setup.VerifyExchangeAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("candidate changed", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(context.Database.GetActiveMicrosoftConfiguration());
+        Assert.Equal(MicrosoftSetupStep.Certificate, context.Setup.GetState().Step);
+        Assert.Equal(1, context.Server.Commands.Count(command =>
+            string.Equals(command, "DATA", StringComparison.OrdinalIgnoreCase)));
     }
 
     [Fact]
@@ -1099,6 +1422,87 @@ public sealed class MicrosoftSetupIntegrationTests
         {
             await Task.Delay(20, deadline.Token);
         }
+    }
+
+    private static Step5AutomaticVerificationSession CreateAutomaticSession(
+        SetupTestContext context,
+        ControlledStep5Delay delay)
+    {
+        return new Step5AutomaticVerificationSession(
+            context.Setup.CaptureStep5VerificationCandidate(),
+            EligibleAutomaticFailure(context.Setup.GetState()),
+            context.Setup.IsStep5VerificationCandidateCurrent,
+            context.Setup.VerifyExchangeAutomaticallyAsync,
+            TimeProvider.System,
+            _ => Task.CompletedTask,
+            CancellationToken.None,
+            CancellationToken.None,
+            Step5AutomaticVerificationOptions.Production,
+            delay.DelayAsync);
+    }
+
+    private static MicrosoftSetupOperationResult EligibleAutomaticFailure(
+        MicrosoftSetupState state)
+    {
+        return new MicrosoftSetupOperationResult(
+            false,
+            Step5AutomaticVerificationSession.WaitingMessage,
+            state,
+            "Authentication · SMTP 535",
+            Guid.NewGuid().ToString("D"),
+            AutomaticVerificationEligible: true);
+    }
+
+    private sealed class ControlledStep5Delay
+    {
+        private readonly ConcurrentQueue<DelayRequest> _requests = new();
+        private readonly SemaphoreSlim _available = new(0);
+
+        internal Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+        {
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var registration = cancellationToken.Register(() =>
+                completion.TrySetCanceled(cancellationToken));
+            _requests.Enqueue(new DelayRequest(delay, completion));
+            _available.Release();
+            return AwaitCompletionAsync(completion.Task, registration);
+        }
+
+        internal async Task WaitUntilPendingAsync()
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (!_requests.Any(request => !request.Completion.Task.IsCompleted))
+            {
+                await Task.Delay(10, timeout.Token);
+            }
+        }
+
+        internal async Task ReleaseNextAsync()
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (true)
+            {
+                await _available.WaitAsync(timeout.Token);
+                if (_requests.TryDequeue(out var request) && request.Completion.TrySetResult())
+                {
+                    return;
+                }
+            }
+        }
+
+        private static async Task AwaitCompletionAsync(
+            Task completion,
+            CancellationTokenRegistration registration)
+        {
+            using (registration)
+            {
+                await completion;
+            }
+        }
+
+        private sealed record DelayRequest(
+            TimeSpan Delay,
+            TaskCompletionSource Completion);
     }
 
     private sealed record QueueLifecycleHarness(

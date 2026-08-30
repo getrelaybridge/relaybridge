@@ -19,8 +19,8 @@ This does not authorize binary publication; signing and Microsoft license clarif
 open. WiX OSMF/license compliance is closed for the current individual, non-revenue-generating use
 and requires re-evaluation if use becomes revenue-generating.
 
-The owner-retest remediation candidate validates in Release with 62 unit and 465 integration tests
-(527 total), zero failures/skips, clean license/static-security/PowerShell/NuGet gates, and a
+The current working tree validates in Release with 62 unit and 482 integration tests
+(544 total), zero failures/skips, clean license/static-security/PowerShell/NuGet gates, and a
 passing unsigned WiX MSI/Burn/SBOM/notices/payload build. This is an uncommitted local owner-test
 candidate only; it does not start M10 or authorize binary publication.
 
@@ -52,6 +52,12 @@ candidate only; it does not start M10 or authorize binary publication.
   Exchange administration, using three bounded delays and a new TLS SMTP connection per attempt;
   non-535, TLS, DNS/TCP, and production queue authentication behavior are unchanged, and no
   MAIL/RCPT/DATA is sent before successful authentication
+- after those short retries exhaust on that exact eligible 535, the active Step 5 page can run one
+  candidate-bound automatic verification session every five minutes for at most 12 attempts or
+  60 minutes. Every attempt rechecks ActivationId/revision/fingerprint authority, Check now is
+  coalesced into the same loop, page/Host disposal cancels it, and success uses the existing
+  certificate-validated token/TLS/XOAUTH2/final-acceptance activation path. This is not a hosted
+  monitor, persists no schedule, mutates no tenant state, and does not change production queue retry
 - WixStdBA now uses the supported large hyperlink-license theme and a complete localization
   contract, so the rendered caption is exactly `RelayBridge Setup`, the accurate MPL/Microsoft
   prerequisite/direct-acquisition disclosure is visible, and standard buttons cannot fall back to
@@ -386,7 +392,7 @@ candidate only; it does not start M10 or authorize binary publication.
   notification, explicitly disabled queue behavior, pre-existing active startup, prompt shutdown
   while waiting, and exact pre-configuration status semantics
 - Release build: 0 warnings, 0 errors
-- Unit tests: 62/62; integration tests: 465/465; total: 527/527; failed: 0; skipped: 0
+- Unit tests: 62/62; integration tests: 482/482; total: 544/544; failed: 0; skipped: 0
 - owner-retest remediation regressions cover bounded SMTP shutdown, expected Host cancellation,
   exact service-process exit ordering, bounded transient SCM start retry, truthful Apply outcomes,
   sanitized Step 3 parsing substages, candidate-bound Entra reuse, 535-to-235 propagation recovery,
@@ -757,10 +763,11 @@ candidate only; it does not start M10 or authorize binary publication.
   remain environment-dependent validation evidence rather than claims of this run. The Advanced
   manual workflow remains available.
 - Newly created Exchange application authorization can transiently return SMTP `535` before
-  propagation completes. Setup remains fail closed and now performs only three brief bounded
-  verification retries for that exact post-administration condition before returning the normal
-  actionable tenant/mailbox SMTP AUTH failure. Production delivery does not classify every 535 as
-  transient propagation.
+  propagation completes. Setup remains fail closed, performs three brief bounded retries for that
+  exact post-administration condition, and can then keep one active Step 5 page-scoped verification
+  session for up to 12 five-minute checks or one hour. Propagation remains a possibility rather than
+  a diagnosis; other failures stop the session, and production delivery does not classify every 535
+  as transient propagation.
 - The parameter-free custom-URI launcher can still be invoked by another local page. It
   carries no authority, the service/launcher identity checks and native confirmation remain
   authoritative, and a launch-intent nonce is deferred as low-risk prompt-spam hardening.

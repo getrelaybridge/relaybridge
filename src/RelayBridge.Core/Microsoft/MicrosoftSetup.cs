@@ -137,4 +137,5 @@ public sealed record MicrosoftSetupOperationResult(
     string Message,
     MicrosoftSetupState State,
     string? TechnicalCode = null,
-    string? CorrelationId = null);
+    string? CorrelationId = null,
+    bool AutomaticVerificationEligible = false);
