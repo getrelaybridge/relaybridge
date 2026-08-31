@@ -7,6 +7,8 @@ param(
     [ValidateSet('Release')]
     [string] $Configuration = 'Release',
 
+    [string] $ArtifactRoot = '',
+
     [string] $SigningCertificateThumbprint = '',
 
     [switch] $SkipBundle
@@ -23,7 +25,12 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = Get-RelayBridgeProductVersion -RepositoryRoot $repositoryRoot
 }
 $msiVersion = ConvertTo-RelayBridgeMsiVersion -Version $Version
-$artifactRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'artifacts\installer'))
+$artifactRoot = if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) {
+    [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'artifacts\installer'))
+}
+else {
+    [IO.Path]::GetFullPath($ArtifactRoot)
+}
 $publishRoot = Join-Path $artifactRoot 'publish'
 $stageRoot = Join-Path $artifactRoot 'stage'
 $cacheRoot = Join-Path $artifactRoot 'cache'
@@ -260,6 +267,15 @@ function Write-JsonFile {
 
     $json = $Value | ConvertTo-Json -Depth $Depth -Compress
     [IO.File]::WriteAllText($Path, $json, [Text.UTF8Encoding]::new($false))
+}
+
+function Write-Utf8TextFile {
+    param(
+        [Parameter(Mandatory)][string] $Value,
+        [Parameter(Mandatory)][string] $Path
+    )
+
+    [IO.File]::WriteAllText($Path, $Value, [Text.UTF8Encoding]::new($false))
 }
 
 function New-FileManifestEntries {
@@ -731,6 +747,70 @@ if ($LASTEXITCODE -ne 0) {
 }
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'docs\release\THIRD-PARTY-NOTICES.md') `
     -Destination (Join-Path $packageRoot 'THIRD-PARTY-NOTICES.md')
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'LICENSE') `
+    -Destination (Join-Path $packageRoot 'LICENSE')
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'docs\release\GETTING-STARTED.md') `
+    -Destination (Join-Path $packageRoot 'GETTING-STARTED.md')
+$releaseNotesName = "RELEASE-NOTES-$Version.md"
+$releaseNotesSource = Join-Path $repositoryRoot "docs\release\$releaseNotesName"
+if (-not (Test-Path -LiteralPath $releaseNotesSource -PathType Leaf)) {
+    throw "The versioned release-notes source is missing: $releaseNotesSource"
+}
+Copy-Item -LiteralPath $releaseNotesSource -Destination (Join-Path $packageRoot $releaseNotesName)
+
+$sourceCommit = (& git -C $repositoryRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') {
+    throw 'The public source revision could not be resolved for release provenance.'
+}
+$sourceTreeStatus = @(& git -C $repositoryRoot status --porcelain=v1 --untracked-files=all)
+if ($LASTEXITCODE -ne 0) {
+    throw 'The public source state could not be resolved for release provenance.'
+}
+$signatureState = if ([string]::IsNullOrWhiteSpace($SigningCertificateThumbprint)) {
+    'NotSigned'
+}
+else {
+    'Signed'
+}
+$artifactClassification = if ($signatureState -eq 'NotSigned') {
+    'UnsignedPublicPrereleaseCandidate'
+}
+else {
+    'SignedReleaseCandidate'
+}
+$releaseProvenance = [ordered]@{
+    SchemaVersion = 1
+    Product = 'RelayBridge'
+    ProductVersion = $Version
+    ArtifactClassification = $artifactClassification
+    SourceRepository = 'https://github.com/getrelaybridge/relaybridge'
+    SourceCommit = $sourceCommit
+    SourceRef = "v$Version"
+    SourceTreeClean = ($sourceTreeStatus.Count -eq 0)
+    SupportedInstaller = "RelayBridge-Setup-$Version-win-x64.exe"
+    SupportingMsi = "RelayBridge-$Version-win-x64.msi"
+    SignatureState = $signatureState
+    ExternalAcquisition = @(
+        $lock.externalAcquisition.packages | ForEach-Object {
+            [ordered]@{
+                Id = $_.id
+                Version = $_.version
+                DownloadUrl = $_.downloadUrl
+                Sha256 = $_.sha256
+                Size = $_.size
+            }
+        }
+    )
+}
+Write-JsonFile $releaseProvenance (Join-Path $packageRoot 'RELEASE-PROVENANCE.json') 8
+
+$checksumFiles = @(
+    Get-ChildItem -LiteralPath $packageRoot -File |
+        Where-Object Name -ne 'SHA256SUMS.txt' |
+        Sort-Object Name
+)
+$checksumLines = @($checksumFiles | ForEach-Object { "$(Get-HexHash $_.FullName)  $($_.Name)" })
+Write-Utf8TextFile (($checksumLines -join "`n") + "`n") (Join-Path $packageRoot 'SHA256SUMS.txt')
 
 & (Join-Path $PSScriptRoot 'validate-installer.ps1') -Version $Version -ArtifactRoot $artifactRoot
 if ($LASTEXITCODE -ne 0) {

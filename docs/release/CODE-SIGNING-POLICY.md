@@ -3,9 +3,10 @@
 ## Status
 
 RelayBridge targets the SignPath Foundation open-source code-signing service. The application has
-not been submitted and no SignPath certificate is currently authorized for RelayBridge. Until an
-application is approved, development MSI/bootstrapper artifacts are unsigned and must not be
-published as official Windows releases.
+not been submitted and no SignPath certificate is currently authorized for RelayBridge.
+Development MSI/bootstrapper artifacts are not releases. The separately reviewed RC1 is intended
+to be an explicitly unsigned public pre-release for evaluation/community testing, with prominent
+Unknown Publisher/SmartScreen warnings; it is not a signed stable production release.
 
 The attribution required by SignPath Foundation is therefore pending, not an active claim:
 

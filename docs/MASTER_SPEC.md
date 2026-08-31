@@ -10,13 +10,13 @@ prompt or a substitute for current implementation evidence.
 is implemented and verified at the current revision. At present:
 
 - Milestone 9 product hardening is frozen.
-- Milestone 10 has not started.
+- Milestone 10 is preparing the unsigned `v1.0.0-rc.1` public evaluation candidate.
 - RelayBridge source is public under MPL-2.0.
 - Official Windows binaries have not been released.
 
 The milestone sections below preserve the incremental product plan. They do not authorize
-re-running completed milestones, starting Milestone 10, or publishing binaries. Contributors and
-coding agents must follow `AGENTS.md` and `CONTRIBUTING.md`.
+re-running completed milestones or publishing binaries outside the explicit M10 release workflow.
+Contributors and coding agents must follow `AGENTS.md` and `CONTRIBUTING.md`.
 
 RelayBridge should remain a **small, understandable, secure, reliable, high-performance production
 application** that solves one problem extremely well.
@@ -2553,9 +2553,10 @@ understandable
 runnable
 ```
 
-Milestones 0 through 9 are implemented historical boundaries; M9 is frozen and M10 has not
-started. The individual milestone documents and `BUILD_STATUS.md` supersede the original planning
-language below when recording actual implementation or verification status.
+Milestones 0 through 9 are implemented historical boundaries; M9 is frozen and M10 release-
+candidate preparation is in progress. The individual milestone documents and `BUILD_STATUS.md`
+supersede the original planning language below when recording actual implementation or
+verification status.
 
 ---
 
@@ -3192,9 +3193,9 @@ The goal is:
 
 # 115. Current Work Boundary
 
-Milestone 9 is frozen. Do not reopen completed milestone architecture without a concrete reproduced
-defect, do not begin Milestone 10 automatically, and do not publish or describe development
-artifacts as official Windows releases.
+Milestone 9 is frozen and M10 is limited to release-candidate documentation, reproducible packaging,
+and finite validation. Do not reopen completed milestone architecture without a concrete reproduced
+defect, and do not publish or describe development artifacts as official Windows releases.
 
 For every requested change, inspect the current repository, use the smallest coherent scope, run
 the relevant Release build/tests and repository verifiers, update `BUILD_STATUS.md` when project

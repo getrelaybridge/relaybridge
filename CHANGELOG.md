@@ -4,6 +4,12 @@ All notable changes will be documented here.
 
 ## Unreleased
 
+- M10 prepares the unsigned `v1.0.0-rc.1` public evaluation candidate without creating the tag or
+  release. It adds the RC warning and administrator guides, versioned release notes, a selectable
+  external artifact root, an exact public release allowlist, path-free source/package provenance,
+  and deterministic SHA-256 checksums. Product, protocol, Microsoft, queue, and security behavior
+  are unchanged.
+
 - RP-1 prepares a clean fresh-history MPL-2.0 public source snapshot, adds a GitHub-hosted unsigned
   release-candidate workflow and SignPath Foundation pre-application policy, closes WiX v6.0.2
   compliance for the current non-revenue status, preserves the full MS-RL notice/source reference,

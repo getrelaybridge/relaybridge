@@ -86,6 +86,11 @@ $required = @(
     (Join-Path $packageRoot "RelayBridge-Setup-$Version-win-x64.exe")
     (Join-Path $packageRoot "RelayBridge-$Version-win-x64.cdx.json")
     (Join-Path $packageRoot 'THIRD-PARTY-NOTICES.md')
+    (Join-Path $packageRoot 'LICENSE')
+    (Join-Path $packageRoot 'GETTING-STARTED.md')
+    (Join-Path $packageRoot "RELEASE-NOTES-$Version.md")
+    (Join-Path $packageRoot 'RELEASE-PROVENANCE.json')
+    (Join-Path $packageRoot 'SHA256SUMS.txt')
 )
 foreach ($path in $required) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -184,6 +189,131 @@ if ($sbom.bomFormat -ne 'CycloneDX' -or $sbom.specVersion -ne '1.6' -or
     -not ($sbom.components | Where-Object { $_.name -eq 'WiX Util extension runtime and custom actions' -and $_.version -eq '6.0.2' -and $_.scope -eq 'required' }) -or
     $sbomText -match '(?i)C:\\Users\\|SetupScratch|tenantId|clientId|access[_ -]?token') {
     throw 'The release SBOM is incomplete or contains machine/tenant credential context.'
+}
+
+$expectedPackageNames = @(
+    'GETTING-STARTED.md',
+    'LICENSE',
+    'RELEASE-PROVENANCE.json',
+    "RELEASE-NOTES-$Version.md",
+    "RelayBridge-$Version-win-x64.cdx.json",
+    "RelayBridge-$Version-win-x64.msi",
+    "RelayBridge-Setup-$Version-win-x64.exe",
+    'SHA256SUMS.txt',
+    'THIRD-PARTY-NOTICES.md'
+) | Sort-Object
+$actualPackageNames = @(Get-ChildItem -LiteralPath $packageRoot -File | ForEach-Object Name | Sort-Object)
+if ([string]::Join("`n", $actualPackageNames) -cne [string]::Join("`n", $expectedPackageNames)) {
+    throw "The public release package differs from the exact allowlist: $($actualPackageNames -join ', ')"
+}
+
+foreach ($copy in @(
+    @{ Source = (Join-Path $repositoryRoot 'LICENSE'); Package = 'LICENSE' },
+    @{ Source = (Join-Path $repositoryRoot 'docs\release\GETTING-STARTED.md'); Package = 'GETTING-STARTED.md' },
+    @{ Source = (Join-Path $repositoryRoot 'docs\release\THIRD-PARTY-NOTICES.md'); Package = 'THIRD-PARTY-NOTICES.md' },
+    @{ Source = (Join-Path $repositoryRoot "docs\release\RELEASE-NOTES-$Version.md"); Package = "RELEASE-NOTES-$Version.md" }
+)) {
+    if ((Get-HexHash $copy.Source) -cne (Get-HexHash (Join-Path $packageRoot $copy.Package))) {
+        throw "Release documentation differs from its source: $($copy.Package)"
+    }
+}
+
+$gettingStarted = Get-Content -LiteralPath (Join-Path $packageRoot 'GETTING-STARTED.md') -Raw
+$releaseNotes = Get-Content -LiteralPath (Join-Path $packageRoot "RELEASE-NOTES-$Version.md") -Raw
+foreach ($requiredText in @(
+    'unsigned pre-release for evaluation and community testing',
+    "RelayBridge-Setup-$Version-win-x64.exe",
+    'Unknown Publisher',
+    'Microsoft Defender SmartScreen',
+    'Apply printer connectivity',
+    'inbound STARTTLS is unavailable',
+    'does not download or install anything',
+    'C:\ProgramData\RelayBridge'
+)) {
+    if (-not $gettingStarted.Contains($requiredText, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Getting Started omits required RC guidance: $requiredText"
+    }
+}
+foreach ($requiredText in @(
+    "# RelayBridge v$Version",
+    'unsigned public pre-release for evaluation and community testing',
+    'not the final stable production release',
+    'Unknown Publisher',
+    'Microsoft Defender SmartScreen',
+    "RelayBridge-Setup-$Version-win-x64.exe",
+    'signed stable `v1.0.0` release is not yet available'
+)) {
+    if (-not $releaseNotes.Contains($requiredText, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Release notes omit required RC guidance: $requiredText"
+    }
+}
+
+$sourceCommit = (& git -C $repositoryRoot rev-parse HEAD).Trim()
+$sourceStatus = @(& git -C $repositoryRoot status --porcelain=v1 --untracked-files=all)
+if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') {
+    throw 'The source revision/state could not be validated against release provenance.'
+}
+$provenancePath = Join-Path $packageRoot 'RELEASE-PROVENANCE.json'
+$provenanceText = Get-Content -LiteralPath $provenancePath -Raw
+$provenance = $provenanceText | ConvertFrom-Json
+$expectedSignatureState = if (
+    (Get-AuthenticodeSignature -LiteralPath (Join-Path $packageRoot "RelayBridge-Setup-$Version-win-x64.exe")).Status -eq 'NotSigned' -and
+    (Get-AuthenticodeSignature -LiteralPath (Join-Path $packageRoot "RelayBridge-$Version-win-x64.msi")).Status -eq 'NotSigned') {
+    'NotSigned'
+}
+else {
+    'Signed'
+}
+if ($provenance.SchemaVersion -ne 1 -or
+    $provenance.Product -cne 'RelayBridge' -or
+    $provenance.ProductVersion -cne $Version -or
+    $provenance.SourceRepository -cne 'https://github.com/getrelaybridge/relaybridge' -or
+    $provenance.SourceCommit -cne $sourceCommit -or
+    $provenance.SourceRef -cne "v$Version" -or
+    $provenance.SourceTreeClean -ne ($sourceStatus.Count -eq 0) -or
+    $provenance.SupportedInstaller -cne "RelayBridge-Setup-$Version-win-x64.exe" -or
+    $provenance.SupportingMsi -cne "RelayBridge-$Version-win-x64.msi" -or
+    $provenance.SignatureState -cne $expectedSignatureState -or
+    $provenanceText -match '(?i)C:\\Users\\|SetupScratch|tenantId|clientId|servicePrincipal|access[_ -]?token|sender@') {
+    throw 'Release provenance is incomplete, inconsistent, or contains private machine/tenant context.'
+}
+$expectedClassification = if ($expectedSignatureState -eq 'NotSigned') {
+    'UnsignedPublicPrereleaseCandidate'
+}
+else {
+    'SignedReleaseCandidate'
+}
+if ($provenance.ArtifactClassification -cne $expectedClassification) {
+    throw 'Release provenance classification differs from the actual signature state.'
+}
+$lockedExternal = @((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'tooling-lock.json') -Raw |
+        ConvertFrom-Json).externalAcquisition.packages)
+if ($provenance.ExternalAcquisition.Count -ne $lockedExternal.Count) {
+    throw 'Release provenance external-acquisition inventory is incomplete.'
+}
+foreach ($lockedPackage in $lockedExternal) {
+    $entry = @($provenance.ExternalAcquisition | Where-Object Id -CEQ $lockedPackage.id)
+    if ($entry.Count -ne 1 -or
+        $entry[0].Version -cne $lockedPackage.version -or
+        $entry[0].DownloadUrl -cne $lockedPackage.downloadUrl -or
+        $entry[0].Sha256 -cne $lockedPackage.sha256 -or
+        $entry[0].Size -ne $lockedPackage.size) {
+        throw "Release provenance differs from the locked external package: $($lockedPackage.id)"
+    }
+}
+
+$checksumPath = Join-Path $packageRoot 'SHA256SUMS.txt'
+$checksumFiles = @(
+    Get-ChildItem -LiteralPath $packageRoot -File |
+        Where-Object Name -ne 'SHA256SUMS.txt' |
+        Sort-Object Name
+)
+$expectedChecksumText = (($checksumFiles | ForEach-Object {
+            "$(Get-HexHash $_.FullName)  $($_.Name)"
+        }) -join "`n") + "`n"
+$actualChecksumText = [IO.File]::ReadAllText($checksumPath, [Text.Encoding]::UTF8)
+if ($actualChecksumText -cne $expectedChecksumText -or $actualChecksumText.Contains("`r")) {
+    throw 'SHA256SUMS.txt is incomplete, incorrectly ordered, or differs from the public artifacts.'
 }
 
 $packageSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Package.wxs') -Raw

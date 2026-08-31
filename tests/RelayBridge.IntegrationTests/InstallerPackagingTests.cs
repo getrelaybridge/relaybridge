@@ -331,9 +331,32 @@ public sealed class InstallerPackagingTests
             StringComparison.Ordinal);
         Assert.Contains("$symbolsRoot = Join-Path $artifactRoot 'symbols'", buildScript, StringComparison.Ordinal);
         Assert.Contains("Move-Item -Destination $symbolsRoot", buildScript, StringComparison.Ordinal);
+        Assert.Contains("[string] $ArtifactRoot = ''", buildScript, StringComparison.Ordinal);
+        Assert.Contains("RELEASE-PROVENANCE.json", buildScript, StringComparison.Ordinal);
+        Assert.Contains("SHA256SUMS.txt", buildScript, StringComparison.Ordinal);
+        Assert.Contains("SourceTreeClean", buildScript, StringComparison.Ordinal);
+        Assert.Contains("UnsignedPublicPrereleaseCandidate", buildScript, StringComparison.Ordinal);
 
         var validationScript = File.ReadAllText(RepositoryPath("installer", "validate-installer.ps1"));
         Assert.Contains("'.pdb', '.wixpdb', '.dbg'", validationScript, StringComparison.Ordinal);
+        Assert.Contains("The public release package differs from the exact allowlist", validationScript, StringComparison.Ordinal);
+        Assert.Contains("SHA256SUMS.txt is incomplete", validationScript, StringComparison.Ordinal);
+        Assert.Contains("SourceTreeClean", validationScript, StringComparison.Ordinal);
+
+        var gettingStarted = File.ReadAllText(RepositoryPath("docs", "release", "GETTING-STARTED.md"));
+        var releaseNotes = File.ReadAllText(RepositoryPath("docs", "release", "RELEASE-NOTES-1.0.0-rc.1.md"));
+        Assert.Contains("unsigned pre-release for evaluation and community testing", gettingStarted, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("RelayBridge-Setup-1.0.0-rc.1-win-x64.exe", gettingStarted, StringComparison.Ordinal);
+        Assert.Contains("Step 5", gettingStarted, StringComparison.Ordinal);
+        Assert.Contains("preserves `C:\\ProgramData\\RelayBridge`", gettingStarted, StringComparison.Ordinal);
+        Assert.Contains("# RelayBridge v1.0.0-rc.1", releaseNotes, StringComparison.Ordinal);
+        Assert.Contains("not the final stable production release", releaseNotes, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Unknown Publisher", releaseNotes, StringComparison.Ordinal);
+
+        var releaseWorkflow = File.ReadAllText(RepositoryPath(".github", "workflows", "release-candidate.yml"));
+        Assert.Contains("artifacts/installer/package/RELEASE-PROVENANCE.json", releaseWorkflow, StringComparison.Ordinal);
+        Assert.Contains("artifacts/installer/package/SHA256SUMS.txt", releaseWorkflow, StringComparison.Ordinal);
+        Assert.Contains("artifacts/installer/package/RELEASE-NOTES-*.md", releaseWorkflow, StringComparison.Ordinal);
 
         Assert.True(File.Exists(RepositoryPath("installer", "generate-sbom.ps1")));
         var sbomScript = File.ReadAllText(RepositoryPath("installer", "generate-sbom.ps1"));
