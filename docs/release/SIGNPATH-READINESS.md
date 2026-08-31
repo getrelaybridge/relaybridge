@@ -42,8 +42,9 @@ the final eligibility decision, including its treatment of upstream runtime bina
 ## First Windows release clarification
 
 SignPath Foundation currently requires a project to be already released in the form that should be
-signed. RelayBridge intentionally has no public unsigned Windows release. Do not publish an unsigned
-installer merely to satisfy that wording without separate owner approval.
+signed. RelayBridge has no published Windows release yet. The owner has separately authorized M10
+preparation of an explicitly unsigned RC1 for evaluation/community testing; it is not being
+published merely to satisfy SignPath wording and does not represent SignPath approval.
 
 Draft inquiry (not sent):
 

@@ -7,8 +7,8 @@ before relaying it to Exchange Online.
 
 ## Project status
 
-Milestones 5.1, 7, 8, 9.1, and 9 are frozen. Milestone 10 Release Candidate is next and has not
-started.
+Milestones 5.1, 7, 8, 9.1, and 9 are frozen. Milestone 10 is preparing the first public release
+candidate, `v1.0.0-rc.1`; no tag or Windows binary release has been published yet.
 The installed Windows product uses a sidecar-free NativeAOT setup launcher, subordinate
 managed worker, protected per-session ProgramData scratch, private PowerShell 7.6.4, and
 ExchangeOnlineManagement 3.9.2. Graph/Entra packages are not embedded in the public-candidate
@@ -16,10 +16,12 @@ MSI or bootstrapper: the installer acquires exact pinned packages directly from 
 after the explicit Graph terms boundary, verifies them twice, and commits them into protected
 Program Files. Normal runtime never contacts the Gallery or falls back to user/system modules.
 
-Development installers are not public-release artifacts. External/public Windows binary publication remains prohibited
-while Microsoft redistribution/missing-license clarification and the trusted Authenticode signing
-identity remain open. WiX Toolset 6 compliance is closed for the current individual,
-non-revenue-generating use and must be reassessed if that status changes. See
+Development installers are not public-release artifacts. The planned RC1 is a deliberately
+unsigned public pre-release for evaluation/community testing and still requires an exact
+release-source commit/tag plus final owner smoke before publication. The later stable production
+release remains gated on the applicable Microsoft clarification and trusted Authenticode signing
+work. WiX Toolset 6 compliance is closed for the current individual, non-revenue-generating use
+and must be reassessed if that status changes. See
 [docs/release/release-gates.md](docs/release/release-gates.md).
 
 RelayBridge source is public and open for review and contribution, but it has not yet issued an
@@ -48,6 +50,18 @@ The canonical product version is `1.0.0-rc.1`. Settings provides a manual, infor
 against official GitHub Releases using Stable or Preview semantics derived from the installed
 version. It sends no tenant, device, message, configuration, or machine identifier, and it never
 downloads or installs an update. See [product versioning and release awareness](docs/release/versioning.md).
+
+## RC1 installation and evaluation
+
+The future supported clean-machine entry point is
+`RelayBridge-Setup-1.0.0-rc.1-win-x64.exe`, not direct MSI installation. RC1 is unsigned and is
+not the final stable production release: Windows will show Unknown Publisher and Microsoft
+Defender SmartScreen may warn. Verify the published SHA-256 checksum before running it and use it
+only when the administrator explicitly accepts pre-release risk.
+
+See [Getting Started](docs/release/GETTING-STARTED.md) for Windows prerequisites, Microsoft 365
+setup, printer/device configuration, repair/upgrade/uninstall, and current limitations. See the
+[RC1 release notes](docs/release/RELEASE-NOTES-1.0.0-rc.1.md) for the exact pre-release status.
 
 ## Architecture
 
@@ -105,7 +119,8 @@ for the Milestone 4 transport and RBAC validation gate.
 - It does not use Microsoft Graph as a mail-delivery fallback.
 - It does not retain Microsoft administrator credentials or delegated provisioning tokens.
 - It does not weaken TLS validation, sender authorization, or the local durable-queue boundary.
-- It does not make unsigned development installers suitable for external deployment.
+- It does not present unsigned development or release-candidate installers as signed stable
+  production releases.
 - It does not claim Windows Server/RDP native-setup support in the current release candidate.
 
 The recommended new-application wizard uses the installer-owned NativeAOT launcher and

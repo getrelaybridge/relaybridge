@@ -132,5 +132,8 @@ package metadata before protected extraction.
 - MICROSOFT GRAPH MISSING `license.txt` CLARIFICATION — OPEN.
 - PUBLIC RELEASE SIGNING GATE — OPEN.
 
-External Windows binary publication is prohibited until every applicable release gate is closed
-with evidence.
+M10 is preparing one explicitly unsigned public RC1 for evaluation/community testing; it does not
+close or reinterpret these external questions. RC1 publication still requires the exact source
+tag, completed package gates, owner smoke approval, and a separate release task. The later signed
+stable production release remains prohibited until its applicable release gates close with
+evidence.

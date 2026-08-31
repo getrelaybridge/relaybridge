@@ -2,12 +2,11 @@
 
 ## Current milestone
 
-Milestone 9 — product hardening: **FROZEN**.
-The finite hardening pass adds bounded Windows service crash recovery, rejects production SMTP
-port zero, closes a failed-SQLite-open resource leak, expands hostile SMTP/storage regression
-coverage, and produces a CycloneDX 1.6 release SBOM plus categorized third-party notices. M9,
-M9.1, M8, M7, and M5.1 are frozen. Schema remains v9. No Microsoft authentication, tenant
-mutation, or Exchange delivery was part of M9 acceptance.
+Milestone 10 — first public release-candidate preparation: **IN PROGRESS**.
+Milestone 9 product hardening, M9.1, M8, M7, and M5.1 remain frozen. M10 changes only public
+release documentation and deterministic release-package metadata for the unsigned
+`v1.0.0-rc.1` evaluation candidate. It does not change schema v9, product behavior, protocols,
+Microsoft tenant state, signing, or the established security architecture.
 
 RelayBridge source is public at `https://github.com/getrelaybridge/relaybridge` from an intentional
 fresh-history snapshot. RelayBridge-owned source is licensed under MPL-2.0, project metadata and
@@ -19,15 +18,24 @@ This does not authorize binary publication; signing and Microsoft license clarif
 open. WiX OSMF/license compliance is closed for the current individual, non-revenue-generating use
 and requires re-evaluation if use becomes revenue-generating.
 
-The current working tree is the uncommitted product-versioning and GitHub release-awareness
-candidate. Its canonical semantic version is `1.0.0-rc.1`; the Release build has zero warnings and
-errors, 86 unit and 497 integration tests pass (583 total, zero failed/skipped), all established
-security/license/package gates pass, and the fresh MSI/Burn/SBOM/notices owner-test package validates.
-This remains a private local unsigned candidate only; it does not create a tag or release, start
-M10, or authorize binary publication.
+The current working tree is the uncommitted M10 RC1-preparation candidate. Its canonical semantic
+version remains `1.0.0-rc.1`; the current candidate passes 86 unit and 497 integration tests
+(583 total, zero failed/skipped). A fresh unsigned external build also passes the installer, SBOM,
+notices, checksum, provenance, signature-state, secret, and payload-hygiene validations. M10 adds
+the public RC warning/guides/release notes plus an exact package allowlist containing SBOM, notices,
+license, Getting Started, release notes, deterministic checksums, and source provenance. No tag,
+release, signing, or binary publication occurs in this preparation task.
 
 ## Implemented
 
+- RC1 release documentation now identifies the Burn bootstrapper as the supported clean-machine
+  entry point; explains first run, customer-owned Microsoft identity/RBAC, bounded Step 5
+  propagation checks, private printer connectivity, Authenticated/Legacy devices, servicing and
+  ProgramData preservation; and records the real unsigned/SmartScreen and product limitations
+- the installer pipeline can place all working output under an explicitly selected artifact root,
+  emits an exact nine-file public release allowlist, records source commit/tag/cleanliness and
+  external-acquisition identities in path-free provenance, and creates deterministic sorted
+  SHA-256 checksums for every public asset except the checksum file itself
 - one `RelayBridgeVersion` property now drives .NET informational/package metadata, semantic
   artifact names, Burn, SBOM, and installer inputs. MSI receives a deterministic bounded numeric
   servicing value that preserves RC/stable/patch ordering while the existing UpgradeCode remains
@@ -770,9 +778,10 @@ M10, or authorize binary publication.
   redirected launcher channels cross, killing the launcher closes its Job and removes worker/pwsh,
   and the Host pipe cannot be reused by direct worker execution. No concrete inheritable Host-pipe
   handle defect was observed.
-- Current development MSI/bootstrapper artifacts are unsigned. Public release signing support is
-  implemented, but `PUBLIC RELEASE SIGNING GATE — OPEN` remains until a trusted code-signing
-  certificate and signed-package verification are available.
+- RC1 is intentionally unsigned and must be presented only as an evaluation/community-testing
+  pre-release with expected Unknown Publisher/SmartScreen warnings. Public release signing support
+  is implemented, but the stable production signing gate remains open until a trusted code-signing
+  identity and signed-package verification are available.
 - The exact Microsoft Graph 2.25.0 Gallery packages declare `RequireLicenseAcceptance=true` and
   `https://aka.ms/devservicesagreement` but omit the `license.txt` described by Gallery publishing
   guidance. M9.1 does not invent that file and no longer redistributes Graph/Entra bytes; written
@@ -856,7 +865,7 @@ M10, or authorize binary publication.
 ## Deferred
 
 - live per-session SMTP timelines/history, printer discovery, remote management, inbound
-  STARTTLS provisioning, and later M10 release-candidate work
+  STARTTLS provisioning, and later signed stable-release work
 - Windows Server/RDP installer support, Server Core, x86/Arm64, arbitrary installation paths,
   automatic application-data removal, tenant cleanup, and installer-managed firewall rules
 - certificate renewal/rotation UI beyond reuse of the same repair wizard
@@ -867,8 +876,10 @@ M10, or authorize binary publication.
 
 ## Next step
 
-M9 remains frozen. The public source repository, fresh history, GitHub noreply identity, main-branch
-ruleset, and public-repository security controls are in place. Confirm GitHub MFA remains enabled
-and send the narrow SignPath first-release inquiry. Do not begin M10 automatically. SignPath,
-Authenticode, and written Microsoft redistribution/missing-license-file clarification remain open;
-external Windows binary publication remains prohibited.
+Merge the reviewed M10 documentation/package machinery through the protected-main PR. A later
+explicit release task must synchronize clean main, create the exact `v1.0.0-rc.1` source tag,
+rebuild the unsigned package from that clean tagged commit, and complete the finite owner smoke
+before publication. Do not create the tag, publish binaries, sign, start SignPath, or update the
+website during this preparation merge. SignPath, stable Authenticode, and written Microsoft
+redistribution/missing-license-file clarification remain open and must continue to be disclosed
+accurately.

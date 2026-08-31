@@ -44,8 +44,11 @@ Normal product runtime never downloads modules or discovers ambient PowerShell i
   independently deployable where prerequisites are already managed.
 - Release signing is supported by the build script but requires a real trusted signing
   certificate; development artifacts can remain unsigned.
-- Microsoft Graph/Entra package redistribution remains subject to legal/license approval. Until
-  that review is complete, locally produced packages must not be published externally.
+- Microsoft Graph/Entra package bytes are not embedded or redistributed by RelayBridge. Burn
+  acquires the exact pinned packages directly from Microsoft's official Gallery after the terms
+  boundary. The separate Microsoft redistribution/missing-license clarification status for the
+  complete release inventory remains recorded in the release gates; this ADR makes no new legal
+  conclusion.
 - Package-level validation does not prove installed ACL ownership, service lifecycle, URI browser
   behavior, rollback, repair, or upgrade. Those remain mandatory disposable-machine acceptance
   gates before M8 can freeze.

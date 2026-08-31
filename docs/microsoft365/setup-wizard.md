@@ -25,6 +25,13 @@ administrator password, and no administrator token enters the Windows Service.
 6. Only after Exchange's final `250` does RelayBridge atomically activate the candidate
    and report Microsoft 365 ready. This proves Microsoft acceptance, not inbox receipt.
 
+When a newly configured Exchange authorization returns the exact propagation-eligible SMTP 535,
+RelayBridge first performs brief bounded retries. If those exhaust, the active Step 5 page can
+check the same authoritative candidate every five minutes for up to 12 attempts or one hour.
+The page-scoped checks are cancellable, never mutate tenant configuration, acquire no broader
+permission, and send no `MAIL`, `RCPT`, or `DATA` while authentication is rejected. RelayBridge
+describes propagation only as a possibility; other failures retain their normal classification.
+
 The existing-application path asks for the same tenant ID, client ID, certificate,
 and sender mailbox. The Entra verification script remains important because the
 runtime application deliberately lacks permission to inspect its own administrative
@@ -159,8 +166,8 @@ payloads, administrator credentials, or private-key material.
 - M5.1 native setup is initially supported only on Windows 10/11 with one local
   interactive administrator. Native Windows Server/RDP/Server Core/multi-user setup
   is not yet claimed.
-- M5.1 implementation is not frozen: production native-path tenant provisioning,
-  actual Entra and Exchange MFA challenges, a native-path out-of-scope mailbox check,
-  exact assignee-wide role inventory and returned scope-filter representation, and an
-  independent adversarial re-audit are still required. The M5 manual flow remains
-  the validated recovery path meanwhile.
+- M5.1 is frozen after production native-path tenant provisioning, exact assignee-wide role
+  inventory/scope verification, authorized and out-of-scope mailbox controls, restart validation,
+  and focused adversarial review. Microsoft may or may not present MFA according to tenant policy;
+  RelayBridge does not claim it can force an MFA challenge. The M5 manual flow remains the
+  validated Advanced recovery path.

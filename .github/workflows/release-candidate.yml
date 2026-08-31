@@ -87,6 +87,11 @@ jobs:
             artifacts/installer/package/*.exe
             artifacts/installer/package/*.cdx.json
             artifacts/installer/package/THIRD-PARTY-NOTICES.md
+            artifacts/installer/package/GETTING-STARTED.md
+            artifacts/installer/package/LICENSE
+            artifacts/installer/package/RELEASE-NOTES-*.md
+            artifacts/installer/package/RELEASE-PROVENANCE.json
+            artifacts/installer/package/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
 
