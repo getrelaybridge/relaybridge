@@ -14,6 +14,8 @@ permissions:
 env:
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
   DOTNET_NOLOGO: "1"
+  GITLEAKS_VERSION: "8.30.1"
+  GITLEAKS_WINDOWS_X64_SHA256: "D29144DEFF3A68AA93CED33DDDF84B7FDC26070ADD4AA0F4513094C8332AFC4E"
 
 jobs:
   build-unsigned-candidate:
@@ -38,8 +40,42 @@ jobs:
             throw 'The checked-out tracked source is not clean.'
           }
 
+      - name: Acquire exact Gitleaks CLI
+        shell: pwsh
+        run: |
+          $archiveName = 'gitleaks_{0}_windows_x64.zip' -f $env:GITLEAKS_VERSION
+          $archivePath = Join-Path $env:RUNNER_TEMP $archiveName
+          $toolRoot = Join-Path $env:RUNNER_TEMP "gitleaks-$env:GITLEAKS_VERSION"
+          $downloadUrl = "https://github.com/gitleaks/gitleaks/releases/download/v$env:GITLEAKS_VERSION/$archiveName"
+
+          Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath -MaximumRedirection 5
+
+          $actualSha256 = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+          if ($actualSha256 -cne $env:GITLEAKS_WINDOWS_X64_SHA256) {
+            throw "Gitleaks archive SHA-256 verification failed."
+          }
+
+          Expand-Archive -LiteralPath $archivePath -DestinationPath $toolRoot
+          $gitleaksPath = Join-Path $toolRoot 'gitleaks.exe'
+          if (-not (Test-Path -LiteralPath $gitleaksPath -PathType Leaf)) {
+            throw 'The verified Gitleaks archive does not contain gitleaks.exe.'
+          }
+
+          $reportedVersion = (& $gitleaksPath version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $reportedVersion -cne $env:GITLEAKS_VERSION) {
+            throw "The verified Gitleaks executable reported an unexpected version."
+          }
+
+          "GITLEAKS_PATH=$gitleaksPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Output "Verified Gitleaks $reportedVersion Windows x64 archive SHA-256 $actualSha256."
+
       - name: Scan repository history for secrets
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        shell: pwsh
+        run: |
+          & $env:GITLEAKS_PATH git . --no-banner --redact --log-opts="--all --full-history"
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Gitleaks found a secret or could not complete the history scan.'
+          }
 
       - name: Set up exact .NET SDK
         uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
