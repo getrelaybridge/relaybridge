@@ -2,14 +2,20 @@
 
 [CmdletBinding()]
 param(
-    [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string] $Version = '0.9.2',
+    [string] $Version = '',
 
     [string] $ArtifactRoot = (Join-Path $PSScriptRoot '..\artifacts\installer')
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+$repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+. (Join-Path $repositoryRoot 'eng\versioning.ps1')
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = Get-RelayBridgeProductVersion -RepositoryRoot $repositoryRoot
+}
+$msiVersion = ConvertTo-RelayBridgeMsiVersion -Version $Version
 
 $artifactRoot = [IO.Path]::GetFullPath($ArtifactRoot)
 $stageRoot = Join-Path $artifactRoot 'stage'
@@ -103,6 +109,16 @@ if (-not $settings.NativeMicrosoftSetup.Enabled -or
     $settings.PrinterConnectivityApply.HelperPath -ne 'C:\Program Files\RelayBridge\Setup\RelayBridge.PrinterConfigurator.exe' -or
     $settings.PrinterConnectivityApply.ExpectedHelperSha256 -ne (Get-HexHash (Join-Path $setupRoot 'RelayBridge.PrinterConfigurator.exe'))) {
     throw 'The staged Host trust-anchor configuration does not match the staged release.'
+}
+
+$hostVersion = [Reflection.AssemblyName]::GetAssemblyName(
+    (Join-Path $hostRoot 'RelayBridge.Host.dll')).Version.ToString()
+$hostFileVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo(
+    (Join-Path $hostRoot 'RelayBridge.Host.dll'))
+if ($hostVersion -ne (($Version -split '-', 2)[0] + '.0') -or
+    $hostFileVersion.ProductVersion -ne $Version -or
+    $hostFileVersion.FileVersion -ne (($Version -split '-', 2)[0] + '.0')) {
+    throw 'The staged Host version metadata differs from the requested product version.'
 }
 
 $forbiddenNames = @('*.pfx', '*.p12', '*.key', '*.pem', '*.db', '*.db-wal', '*.db-shm', '*.eml', '*.pdb', '*.trx')
@@ -247,6 +263,8 @@ if ($acceptanceText -ne 'I &accept the Microsoft Graph terms') {
 }
 
 Write-Output 'RELAYBRIDGE_INSTALLER_VALIDATION=PASS'
+Write-Output "PRODUCT_VERSION=$Version"
+Write-Output "MSI_VERSION=$msiVersion"
 Write-Output "HELPER_FILES=$((Get-Content -LiteralPath $helperManifestPath -Raw | ConvertFrom-Json).Files.Count)"
 Write-Output "TOOLING_FILES=$((Get-Content -LiteralPath $toolingManifestPath -Raw | ConvertFrom-Json).Files.Count)"
 Write-Output "STAGED_FILES=$((Get-ChildItem -LiteralPath $stageRoot -Recurse -File).Count)"

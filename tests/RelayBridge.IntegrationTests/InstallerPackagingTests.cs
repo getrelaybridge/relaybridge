@@ -17,6 +17,8 @@ public sealed class InstallerPackagingTests
         var document = LoadXml("installer", "Package.wxs");
         var package = document.Root!.Element(Wix + "Package")!;
 
+        Assert.Equal("$(var.MsiVersion)", package.Attribute("Version")?.Value);
+        Assert.Equal("6F546D3A-57EE-4E57-A724-89E78374DC81", package.Attribute("UpgradeCode")?.Value);
         Assert.Equal("perMachine", package.Attribute("Scope")?.Value);
         Assert.Equal("500", package.Attribute("InstallerVersion")?.Value);
         Assert.NotNull(document.Descendants(Wix + "StandardDirectory")
@@ -311,6 +313,16 @@ public sealed class InstallerPackagingTests
         Assert.Contains("WixToolset.Util.wixext", installerProject, StringComparison.Ordinal);
 
         var buildScript = File.ReadAllText(RepositoryPath("installer", "build-installer.ps1"));
+        var directoryBuildProps = File.ReadAllText(RepositoryPath("Directory.Build.props"));
+        var versioningScript = File.ReadAllText(RepositoryPath("eng", "versioning.ps1"));
+        Assert.Contains("<RelayBridgeVersion>1.0.0-rc.1</RelayBridgeVersion>", directoryBuildProps, StringComparison.Ordinal);
+        Assert.Contains("Get-RelayBridgeProductVersion", buildScript, StringComparison.Ordinal);
+        Assert.Contains("ConvertTo-RelayBridgeMsiVersion", buildScript, StringComparison.Ordinal);
+        Assert.Contains("-p:MsiVersion=", buildScript, StringComparison.Ordinal);
+        Assert.Contains("$stage = 255", versioningScript, StringComparison.Ordinal);
+        Assert.Contains("$stage = $rc", versioningScript, StringComparison.Ordinal);
+        Assert.Contains("$build = ($patch * 256) + $stage", versioningScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("[string]$Version = '0.9.", buildScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Install-Module", buildScript, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("-RequiredVersion latest", buildScript, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(

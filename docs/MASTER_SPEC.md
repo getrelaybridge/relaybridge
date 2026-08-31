@@ -152,7 +152,8 @@ Normal external communication should only occur where necessary for:
 
 - Microsoft authentication
 - Microsoft 365 SMTP delivery
-- optional manually initiated update checks if implemented later
+- manually initiated, informational release-metadata checks against the canonical public GitHub
+  repository; these send no tenant, device, message, configuration, or machine identifier
 
 The application must continue functioning without any RelayBridge-operated infrastructure.
 
@@ -2362,6 +2363,17 @@ This is an example of intentionally controlling scope.
 # 84. Updates
 
 Do not implement a RelayBridge update cloud service.
+
+RelayBridge exposes its compiled semantic product version and derives a Stable or Preview release
+channel from that version. An administrator may manually request one bounded, unauthenticated HTTPS
+check of official GitHub Release metadata for `getrelaybridge/relaybridge`. Drafts and malformed
+tags are ignored, response size/count are bounded, and release links are constructed only from a
+strictly validated tag under the fixed canonical repository. GitHub availability is not a health,
+startup, intake, queue, Microsoft, or delivery dependency.
+
+The current implementation does not check automatically, download, install, or execute an update.
+It sends no tenant, device, message, configuration, machine identifier, credential, or telemetry
+data. A failed check remains an informational **Could not check** state.
 
 V1 supports:
 

@@ -202,6 +202,13 @@ The release pipeline also emits a CycloneDX 1.6 SBOM and categorized third-party
 inventory. These artifacts contain component identities only, never machine paths, tenant IDs,
 mailbox data, tokens, or package-cache locations.
 
+The compiled Host informational version is the authoritative user-visible product version. The
+Settings page can make one administrator-initiated, bounded request to the fixed official GitHub
+Releases API and compare strictly parsed Stable or Preview tags. The response is never executed,
+release-supplied URLs are ignored, redirects are disabled, and the only outbound application
+metadata is the `RelayBridge/<version>` user agent. The result is in-process informational state;
+there is no automatic checker, update download, installer launch, telemetry, or health dependency.
+
 The NativeAOT launcher creates the managed worker environment from a fixed allowlist:
 required Windows paths, interactive-user Windows known folders, and Program Files only.
 Raw `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` variants are not inherited.

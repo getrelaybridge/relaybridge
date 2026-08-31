@@ -7,6 +7,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+& (Join-Path $PSScriptRoot 'verify-version.ps1')
 $tracked = @(& git -C $repositoryRoot ls-files)
 if ($LASTEXITCODE -ne 0) {
     throw 'Unable to enumerate tracked release inputs.'

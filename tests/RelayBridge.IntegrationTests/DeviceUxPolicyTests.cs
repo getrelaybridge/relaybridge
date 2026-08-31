@@ -345,6 +345,26 @@ public sealed class DeviceUxPolicyTests
     }
 
     [Fact]
+    public void Settings_exposes_manual_informational_release_awareness_without_automatic_contact()
+    {
+        var settings = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(), "src", "RelayBridge.Host", "Components", "Pages", "Settings.razor"));
+        var home = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(), "src", "RelayBridge.Host", "Components", "Pages", "Home.razor"));
+        var program = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(), "src", "RelayBridge.Host", "Program.cs"));
+
+        Assert.Contains("Check for updates", settings, StringComparison.Ordinal);
+        Assert.Contains("contact GitHub directly", settings, StringComparison.Ordinal);
+        Assert.Contains("does not download or install updates", settings, StringComparison.Ordinal);
+        Assert.Contains("does not contact GitHub automatically", settings, StringComparison.Ordinal);
+        Assert.Contains("View release", settings, StringComparison.Ordinal);
+        Assert.Contains("release-notice", home, StringComparison.Ordinal);
+        Assert.Contains("AllowAutoRedirect = false", program, StringComparison.Ordinal);
+        Assert.DoesNotContain("AddHostedService<ReleaseAwareness", program, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Step5_ui_exposes_bounded_page_scoped_automatic_verification_status_and_controls()
     {
         var source = File.ReadAllText(Path.Combine(

@@ -10,6 +10,7 @@ using RelayBridge.Host.Services;
 using RelayBridge.Infrastructure.Diagnostics;
 using RelayBridge.Infrastructure.Microsoft;
 using RelayBridge.Infrastructure.Queue;
+using RelayBridge.Infrastructure.Release;
 using RelayBridge.Infrastructure.Smtp;
 using RelayBridge.Infrastructure.Storage;
 
@@ -119,6 +120,17 @@ builder.Services.AddSingleton(serviceProvider => new DeviceEndpointAdvisor(
     serviceProvider.GetRequiredService<IOptions<SmtpListenerOptions>>().Value,
     serviceProvider.GetRequiredService<ILanAddressDiscovery>()));
 builder.Services.AddSingleton<PrinterConnectivityApplyCoordinator>();
+builder.Services.AddSingleton<ProductVersionService>();
+builder.Services.AddHttpClient<GitHubReleaseChecker>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+    client.MaxResponseContentBufferSize = GitHubReleaseChecker.MaximumResponseBytes;
+})
+.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    AllowAutoRedirect = false,
+});
+builder.Services.AddSingleton<ReleaseAwarenessService>();
 builder.Services.AddSingleton<IMailDeliveryProvider>(serviceProvider =>
     serviceProvider.GetRequiredService<ExchangeSmtpOAuthProvider>());
 builder.Services.AddSingleton(serviceProvider => new SmtpListener(

@@ -2,7 +2,7 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string] $Version,
+    [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?$')][string] $Version,
     [Parameter(Mandatory)][string] $PublishRoot,
     [Parameter(Mandatory)][string] $ToolingLockPath,
     [Parameter(Mandatory)][string] $OutputPath

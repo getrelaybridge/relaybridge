@@ -19,13 +19,26 @@ This does not authorize binary publication; signing and Microsoft license clarif
 open. WiX OSMF/license compliance is closed for the current individual, non-revenue-generating use
 and requires re-evaluation if use becomes revenue-generating.
 
-The current working tree validates in Release with 62 unit and 482 integration tests
-(544 total), zero failures/skips, clean license/static-security/PowerShell/NuGet gates, and a
-passing unsigned WiX MSI/Burn/SBOM/notices/payload build. This is an uncommitted local owner-test
-candidate only; it does not start M10 or authorize binary publication.
+The current working tree is the uncommitted product-versioning and GitHub release-awareness
+candidate. Its canonical semantic version is `1.0.0-rc.1`; the Release build has zero warnings and
+errors, 86 unit and 497 integration tests pass (583 total, zero failed/skipped), all established
+security/license/package gates pass, and the fresh MSI/Burn/SBOM/notices owner-test package validates.
+This remains a private local unsigned candidate only; it does not create a tag or release, start
+M10, or authorize binary publication.
 
 ## Implemented
 
+- one `RelayBridgeVersion` property now drives .NET informational/package metadata, semantic
+  artifact names, Burn, SBOM, and installer inputs. MSI receives a deterministic bounded numeric
+  servicing value that preserves RC/stable/patch ordering while the existing UpgradeCode remains
+  unchanged
+- Settings exposes the compiled product version and derived Stable/Preview channel plus a manual,
+  informational check of the fixed official GitHub Releases API. The bounded unauthenticated
+  client ignores drafts, malformed tags, release-supplied URLs/body/assets, and redirects, selects
+  the highest valid semantic version for the channel, and never downloads or installs software
+- release checks send no tenant, device, message, configuration, machine identifier, credential,
+  or telemetry data; there is no automatic/hosted checker, and GitHub availability cannot affect
+  service health, SMTP intake, queue processing, Microsoft configuration, or delivery
 - the single enabled queue-worker lifecycle now starts in a bounded inactive wait when Microsoft is
   not configured and is released only after the existing authoritative candidate activation
   transaction commits. The one-shot process-local latch cannot lose an activation wake, creates no
@@ -387,6 +400,15 @@ candidate only; it does not start M10 or authorize binary publication.
 
 ## Verified
 
+- product version verification passes for exact Host assembly/file/informational metadata,
+  semantic artifact/SBOM naming, bounded MSI mapping and numeric ordering from 0.9.2 through RC,
+  stable, patch, minor, and major examples; the built RC1 MSI reports servicing version `1.0.1`
+- release-awareness tests pass for strict stable/RC parsing and ordering, Stable/Preview filtering,
+  draft/malformed exclusion, highest-version selection, fixed release-link construction, no request
+  before administrator action, privacy-safe headers, 403/500/timeout/malformed/oversized failures,
+  and no release-supplied URL use
+- Release build: 0 warnings, 0 errors; unit tests: 86/86; integration tests: 497/497; total:
+  583/583; failed: 0; skipped: 0
 - queue-activation regressions cover queued-before-activation processing in the existing worker,
   authoritative activation wake, failed/cancelled/stale candidate isolation, repeated coalesced
   notification, explicitly disabled queue behavior, pre-existing active startup, prompt shutdown

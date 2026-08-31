@@ -2,8 +2,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string] $Version = '0.9.2',
+    [string] $Version = '',
 
     [ValidateSet('Release')]
     [string] $Configuration = 'Release',
@@ -19,6 +18,11 @@ $ProgressPreference = 'SilentlyContinue'
 $env:MSBUILDDISABLENODEREUSE = '1'
 
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+. (Join-Path $repositoryRoot 'eng\versioning.ps1')
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = Get-RelayBridgeProductVersion -RepositoryRoot $repositoryRoot
+}
+$msiVersion = ConvertTo-RelayBridgeMsiVersion -Version $Version
 $artifactRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'artifacts\installer'))
 $publishRoot = Join-Path $artifactRoot 'publish'
 $stageRoot = Join-Path $artifactRoot 'stage'
@@ -675,6 +679,7 @@ Invoke-DotNet @(
     'installer\RelayBridge.Installer.wixproj',
     '-c', $Configuration,
     ('-p:ProductVersion=' + $Version),
+    ('-p:MsiVersion=' + $msiVersion),
     ('-p:StageRoot=' + $stageRoot),
     ('-p:BrandingRoot=' + $brandingRoot),
     ('-p:OutputPath=' + $packageRoot + '\'),
@@ -734,6 +739,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Output 'RELAYBRIDGE_INSTALLER_BUILD=PASS'
 Write-Output "VERSION=$Version"
+Write-Output "MSI_VERSION=$msiVersion"
 Write-Output "MSI=$msiPath"
 Write-Output "SBOM=$sbomPath"
 if (-not $SkipBundle) {
