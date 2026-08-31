@@ -44,6 +44,11 @@ provisioned, and delivery workers remain disabled until explicitly configured.
 See [BUILD_STATUS.md](BUILD_STATUS.md) for verified repository state and
 [docs/MASTER_SPEC.md](docs/MASTER_SPEC.md) for the authoritative product scope.
 
+The canonical product version is `1.0.0-rc.1`. Settings provides a manual, informational check
+against official GitHub Releases using Stable or Preview semantics derived from the installed
+version. It sends no tenant, device, message, configuration, or machine identifier, and it never
+downloads or installs an update. See [product versioning and release awareness](docs/release/versioning.md).
+
 ## Architecture
 
 RelayBridge runtime uses one service process with three primary projects, plus narrowly scoped

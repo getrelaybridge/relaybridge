@@ -2,6 +2,8 @@
 
 @page "/"
 @using RelayBridge.Core.Microsoft
+@using RelayBridge.Core.Release
+@using RelayBridge.Host.Services
 @using RelayBridge.Infrastructure.Microsoft
 @using RelayBridge.Infrastructure.Smtp
 @using RelayBridge.Infrastructure.Storage
@@ -13,6 +15,7 @@
 @inject HealthCheckService HealthChecks
 @inject IOptions<SmtpListenerOptions> ListenerOptions
 @inject DeviceEndpointAdvisor Endpoints
+@inject ReleaseAwarenessService ReleaseAwareness
 
 <PageTitle>Dashboard · RelayBridge</PageTitle>
 
@@ -24,6 +27,14 @@
     </div>
     <a class="button primary" href="@PrimaryActionHref">@PrimaryActionLabel</a>
 </div>
+
+@if (ReleaseAwareness.LastResult is { Status: ReleaseCheckStatus.UpdateAvailable, AvailableVersion: { } available, ReleaseUri: { } releaseUri })
+{
+    <div class="notice release-notice" role="status">
+        <span>RelayBridge @available is available.</span>
+        <a href="@releaseUri.AbsoluteUri" target="_blank" rel="noopener noreferrer">View release</a>
+    </div>
+}
 
 <section class="health-banner" aria-label="Relay status">
     <span class="status-dot @LocalStatusClass" aria-hidden="true">@LocalStatusSymbol</span>

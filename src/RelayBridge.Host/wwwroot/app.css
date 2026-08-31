@@ -535,6 +535,22 @@ textarea {
     background: #fff2f0;
 }
 
+.release-notice {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    border: 1px solid #d6e1db;
+    color: #33483d;
+    background: #f7faf8;
+}
+
+.release-notice a {
+    color: #146c43;
+    font-weight: 750;
+}
+
 .notice details {
     margin-top: 0.5rem;
 }

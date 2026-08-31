@@ -5,7 +5,7 @@
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package Name="RelayBridge"
            Manufacturer="RelayBridge Project"
-           Version="$(var.ProductVersion)"
+           Version="$(var.MsiVersion)"
            UpgradeCode="6F546D3A-57EE-4E57-A724-89E78374DC81"
            Language="1033"
            Codepage="1252"

@@ -3,6 +3,7 @@
 @page "/settings"
 @rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
 @using Microsoft.Extensions.Options
+@using RelayBridge.Core.Release
 @using RelayBridge.Host.Services
 @using RelayBridge.Infrastructure.Queue
 @using RelayBridge.Infrastructure.Smtp
@@ -12,10 +13,37 @@
 @inject IOptions<QueueOptions> Queue
 @inject DeviceEndpointAdvisor Endpoints
 @inject PrinterConnectivityApplyCoordinator PrinterApply
+@inject ReleaseAwarenessService ReleaseAwareness
 
 <PageTitle>Settings · RelayBridge</PageTitle>
 
 <div class="page-heading"><div><p class="eyebrow">Local service</p><h1>Settings</h1><p class="lead">Current listener, printer-connectivity requirements, and management safety boundaries.</p></div></div>
+
+<section class="settings-preview" aria-labelledby="software-version-heading">
+    <div><p class="eyebrow">Software</p><h2 id="software-version-heading">Version and releases</h2></div>
+    <dl class="stacked-details connectivity-details">
+        <div><dt>RelayBridge version</dt><dd>@ReleaseAwareness.CurrentVersion</dd></div>
+        <div><dt>Release channel</dt><dd>@ReleaseAwareness.Channel</dd></div>
+        <div><dt>Update status</dt><dd>@ReleaseStatusText</dd></div>
+        <div><dt>Last checked</dt><dd>@LastCheckedText</dd></div>
+        @if (ReleaseAwareness.LastResult?.AvailableVersion is { } available)
+        {
+            <div><dt>New version</dt><dd>@available</dd></div>
+            <div><dt>Released</dt><dd>@ReleasedText</dd></div>
+        }
+    </dl>
+    <div class="actions">
+        <button class="button secondary" @onclick="CheckForUpdatesAsync" disabled="@_checking">
+            @(_checking ? "Checking…" : ReleaseAwareness.Status == ReleaseCheckStatus.NotChecked ? "Check for updates" : "Check again")
+        </button>
+        @if (ReleaseAwareness.LastResult?.ReleaseUri is { } releaseUri)
+        {
+            <a class="button primary" href="@releaseUri.AbsoluteUri" target="_blank" rel="noopener noreferrer">View release</a>
+        }
+    </div>
+    <p class="card-note">Update checks contact GitHub directly for published RelayBridge release metadata. No Microsoft tenant, device, message, or RelayBridge configuration data is sent. RelayBridge does not download or install updates.</p>
+    <p class="card-note">Checks occur only when an administrator selects <strong>Check for updates</strong>. RelayBridge does not contact GitHub automatically.</p>
+</section>
 
 <section id="printer-connectivity" class="settings-preview" aria-labelledby="printer-connectivity-heading">
     <div><p class="eyebrow">Required before adding an authenticated printer</p><h2 id="printer-connectivity-heading">Printer connectivity</h2></div>
@@ -148,6 +176,7 @@
     private string? _selectedAddress;
     private string? _notice;
     private bool _applying;
+    private bool _checking;
     protected override void OnInitialized()
     {
         Advice = Endpoints.GetAdvice();
@@ -199,5 +228,34 @@
         await JavaScript.InvokeVoidAsync("relayBridge.copyText", ConfigurationExample);
         _notice = "Copied the generated configuration. It is still not applied.";
     }
+    private async Task CheckForUpdatesAsync()
+    {
+        if (_checking)
+        {
+            return;
+        }
+
+        _checking = true;
+        try
+        {
+            await ReleaseAwareness.CheckNowAsync();
+        }
+        finally
+        {
+            _checking = false;
+        }
+    }
+    private string ReleaseStatusText => ReleaseAwareness.Status switch
+    {
+        ReleaseCheckStatus.Checking => "Checking",
+        ReleaseCheckStatus.UpToDate => "Up to date",
+        ReleaseCheckStatus.UpdateAvailable => "Update available",
+        ReleaseCheckStatus.CouldNotCheck => "Could not check for updates",
+        _ => "Not checked",
+    };
+    private string LastCheckedText => ReleaseAwareness.LastResult?.CheckedUtc.ToLocalTime()
+        .ToString("d MMM yyyy, h:mm tt") ?? "Not available";
+    private string ReleasedText => ReleaseAwareness.LastResult?.PublishedUtc?.ToLocalTime()
+        .ToString("d MMM yyyy") ?? "Not available";
     private static string FormatBytes(long bytes) => $"{bytes / (1024d * 1024d):0.#} MiB";
 }

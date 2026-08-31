@@ -7,14 +7,14 @@
     <Platform>x64</Platform>
     <InstallerPlatform>x64</InstallerPlatform>
     <OutputName>RelayBridge-$(ProductVersion)-win-x64</OutputName>
-    <ProductVersion Condition="'$(ProductVersion)' == ''">0.9.2</ProductVersion>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">$(RelayBridgeVersion)</ProductVersion>
     <StageRoot Condition="'$(StageRoot)' == ''">$(MSBuildThisFileDirectory)..\artifacts\installer\stage</StageRoot>
     <BrandingRoot Condition="'$(BrandingRoot)' == ''">$(MSBuildThisFileDirectory)..\artifacts\installer\branding</BrandingRoot>
     <SuppressValidation>false</SuppressValidation>
     <!-- e_sqlite3.dll has no version-language resource; ICE60 still validates the authored default. -->
     <SuppressSpecificWarnings>1101</SuppressSpecificWarnings>
     <WixToolsetProjectName>RelayBridge</WixToolsetProjectName>
-    <DefineConstants>ProductVersion=$(ProductVersion);StageRoot=$(StageRoot);BrandingRoot=$(BrandingRoot)</DefineConstants>
+    <DefineConstants>ProductVersion=$(ProductVersion);MsiVersion=$(MsiVersion);StageRoot=$(StageRoot);BrandingRoot=$(BrandingRoot)</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -26,4 +26,8 @@
     <Compile Include="Package.wxs" />
     <Compile Include="$(StageRoot)\GeneratedFiles.wxs" Link="GeneratedFiles.wxs" />
   </ItemGroup>
+
+  <Target Name="RequireDerivedMsiVersion" BeforeTargets="Build" Condition="'$(MsiVersion)' == ''">
+    <Error Text="Build the installer through build-installer.ps1 so MsiVersion is derived from RelayBridgeVersion." />
+  </Target>
 </Project>
