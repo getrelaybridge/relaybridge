@@ -39,13 +39,13 @@ guidance does not limit the rights granted by MPL-2.0.
 
 ## Publication boundary
 
-Public source readiness does not by itself authorize installer publication. M10 is preparing one
-explicitly unsigned public RC1 for evaluation/community testing, but publication still requires
-the exact merged source commit/tag, passing package gates, owner smoke approval, and a separate
-release task. Authenticode signing, Microsoft licensing clarification, and SignPath eligibility
-remain separate gates for the later signed stable release in `docs/release/release-gates.md`. WiX
-Toolset 6 OSMF/license compliance is closed for the current individual, non-revenue-generating use
-and must be reviewed again if that status changes.
+Public source readiness does not by itself authorize installer publication. The unsigned
+`v1.0.0-rc.1` evaluation/community-testing pre-release was published only after its exact source
+tag, package gates, checksums/provenance, and owner smoke passed. Its corresponding source remains
+available at the immutable public tag. Authenticode signing, Microsoft licensing clarification,
+and SignPath eligibility remain separate gates for a later signed stable release in
+`docs/release/release-gates.md`. WiX Toolset 6 OSMF/license compliance is closed for the current
+individual, non-revenue-generating use and must be reviewed again if that status changes.
 
 ## Public snapshot inventory
 
@@ -64,7 +64,7 @@ The public repository began with one fresh root commit and did not import privat
 commits or milestone tags. All reachable public commits use the GitHub noreply identity for
 `yuvaraj-builds-ai`; no private email is used or inferred.
 
-Public source may be published before Windows binaries. Each later binary release must refer to its
-exact corresponding public source tag. The unsigned RC1 preparation does not create that tag or
-publish a binary; the signed stable production release remains prohibited until its applicable
+Public source may be published before Windows binaries. Each binary release must refer to its exact
+corresponding public source tag. The public unsigned RC1 binaries correspond to the immutable
+`v1.0.0-rc.1` tag. A signed stable production release remains prohibited until its applicable
 external release gates close.

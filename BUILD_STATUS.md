@@ -2,11 +2,11 @@
 
 ## Current milestone
 
-Milestone 10 — first public release-candidate preparation: **IN PROGRESS**.
-Milestone 9 product hardening, M9.1, M8, M7, and M5.1 remain frozen. M10 changes only public
-release documentation and deterministic release-package metadata for the unsigned
-`v1.0.0-rc.1` evaluation candidate. It does not change schema v9, product behavior, protocols,
-Microsoft tenant state, signing, or the established security architecture.
+Milestone 10 — first public release candidate: **COMPLETED / PUBLIC**.
+Milestone 9 product hardening, M9.1, M8, M7, and M5.1 remain frozen. The unsigned
+`v1.0.0-rc.1` evaluation/community-testing pre-release is public with its exact source tag,
+release package, checksums, provenance, SBOM, notices, and owner smoke evidence. It is not the
+signed stable production release.
 
 RelayBridge source is public at `https://github.com/getrelaybridge/relaybridge` from an intentional
 fresh-history snapshot. RelayBridge-owned source is licensed under MPL-2.0, project metadata and
@@ -14,17 +14,17 @@ deterministic license checks agree, governance and security reporting files are 
 current plus reachable-history scans found no committed secrets or private artifacts. RP-1 adds a
 deterministic source-only public export, public release CI/origin-verification foundation, SignPath
 pre-application policy, exact WiX v6.0.2 notices/source, and corrected SBOM runtime classification.
-This does not authorize binary publication; signing and Microsoft license clarification remain
-open. WiX OSMF/license compliance is closed for the current individual, non-revenue-generating use
-and requires re-evaluation if use becomes revenue-generating.
+RC1 publication does not close signing or Microsoft license clarification. WiX OSMF/license
+compliance is closed for the current individual, non-revenue-generating use and requires
+re-evaluation if use becomes revenue-generating.
 
-The current working tree is the uncommitted M10 RC1-preparation candidate. Its canonical semantic
-version remains `1.0.0-rc.1`; the current candidate passes 86 unit and 497 integration tests
-(583 total, zero failed/skipped). A fresh unsigned external build also passes the installer, SBOM,
-notices, checksum, provenance, signature-state, secret, and payload-hygiene validations. M10 adds
-the public RC warning/guides/release notes plus an exact package allowlist containing SBOM, notices,
-license, Getting Started, release notes, deterministic checksums, and source provenance. No tag,
-release, signing, or binary publication occurs in this preparation task.
+The canonical semantic version remains `1.0.0-rc.1`; the current main passes 86 unit and 497
+integration tests (583 total, zero failed/skipped). The immutable RC1 tag points to
+`404ceb8d578434e07ef2c9e23fa3b2f28570267d`; current main additionally contains only the reviewed
+post-tag Gitleaks CI correction, which is not part of the RC1 source or package. The exact tagged,
+unsigned RC1 build passed installer, SBOM, notices, checksum, provenance, signature-state, secret,
+payload-hygiene, and owner-smoke validation before publication. No signing or stable release has
+occurred, and SignPath has not been started or approved.
 
 ## Implemented
 
@@ -876,10 +876,8 @@ release, signing, or binary publication occurs in this preparation task.
 
 ## Next step
 
-Merge the reviewed M10 documentation/package machinery through the protected-main PR. A later
-explicit release task must synchronize clean main, create the exact `v1.0.0-rc.1` source tag,
-rebuild the unsigned package from that clean tagged commit, and complete the finite owner smoke
-before publication. Do not create the tag, publish binaries, sign, start SignPath, or update the
-website during this preparation merge. SignPath, stable Authenticode, and written Microsoft
-redistribution/missing-license-file clarification remain open and must continue to be disclosed
-accurately.
+No RC2 or stable `v1.0.0` work is active. Maintain the public unsigned RC1 through the protected-main
+workflow without changing its immutable tag or release assets. Public administrator documentation
+is available at `https://getrelaybridge.com/docs/`. SignPath, stable Authenticode, and written
+Microsoft redistribution/missing-license-file clarification remain open and must continue to be
+disclosed accurately.

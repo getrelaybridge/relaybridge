@@ -7,8 +7,9 @@ before relaying it to Exchange Online.
 
 ## Project status
 
-Milestones 5.1, 7, 8, 9.1, and 9 are frozen. Milestone 10 is preparing the first public release
-candidate, `v1.0.0-rc.1`; no tag or Windows binary release has been published yet.
+Milestones 5.1, 7, 8, 9.1, and 9 are frozen. Milestone 10 produced the first public release
+candidate, [`v1.0.0-rc.1`](https://github.com/getrelaybridge/relaybridge/releases/tag/v1.0.0-rc.1),
+as an unsigned pre-release for evaluation and community testing.
 The installed Windows product uses a sidecar-free NativeAOT setup launcher, subordinate
 managed worker, protected per-session ProgramData scratch, private PowerShell 7.6.4, and
 ExchangeOnlineManagement 3.9.2. Graph/Entra packages are not embedded in the public-candidate
@@ -16,23 +17,23 @@ MSI or bootstrapper: the installer acquires exact pinned packages directly from 
 after the explicit Graph terms boundary, verifies them twice, and commits them into protected
 Program Files. Normal runtime never contacts the Gallery or falls back to user/system modules.
 
-Development installers are not public-release artifacts. The planned RC1 is a deliberately
-unsigned public pre-release for evaluation/community testing and still requires an exact
-release-source commit/tag plus final owner smoke before publication. The later stable production
-release remains gated on the applicable Microsoft clarification and trusted Authenticode signing
-work. WiX Toolset 6 compliance is closed for the current individual, non-revenue-generating use
-and must be reassessed if that status changes. See
+Development installers are not public-release artifacts. The published RC1 was built from its
+exact source tag, passed the release-package gates and owner smoke, and remains deliberately
+unsigned. It is not the stable production release. The later stable production release remains
+gated on the applicable Microsoft clarification and trusted Authenticode signing work. WiX Toolset
+6 compliance is closed for the current individual, non-revenue-generating use and must be
+reassessed if that status changes. See
 [docs/release/release-gates.md](docs/release/release-gates.md).
 
-RelayBridge source is public and open for review and contribution, but it has not yet issued an
-official Windows binary release. It was created and is maintained by
+RelayBridge source and the unsigned RC1 Windows binaries are public. RelayBridge was created and
+is maintained by
 [@yuvaraj-builds-ai](https://github.com/yuvaraj-builds-ai), with
 contributions reviewed through the maintainer-led process in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Public source may precede the first official Windows binary release. The public repository began
-from a clean tracked-source snapshot with fresh Git history; the private engineering
-history and milestone tags are not publication inputs. The planned SignPath Foundation integration
-and current pre-application rules are documented in the
+The public repository began from a clean tracked-source snapshot with fresh Git history; the
+private engineering history and milestone tags are not publication inputs. The RC1 source is
+available at its exact public tag. Future SignPath Foundation integration and current
+pre-application rules are documented in the
 [code signing policy](docs/release/CODE-SIGNING-POLICY.md).
 
 The existing runtime provides a bounded local SMTP listener, per-device authentication and
@@ -53,7 +54,7 @@ downloads or installs an update. See [product versioning and release awareness](
 
 ## RC1 installation and evaluation
 
-The future supported clean-machine entry point is
+The supported RC1 clean-machine entry point is
 `RelayBridge-Setup-1.0.0-rc.1-win-x64.exe`, not direct MSI installation. RC1 is unsigned and is
 not the final stable production release: Windows will show Unknown Publisher and Microsoft
 Defender SmartScreen may warn. Verify the published SHA-256 checksum before running it and use it
@@ -61,7 +62,8 @@ only when the administrator explicitly accepts pre-release risk.
 
 See [Getting Started](docs/release/GETTING-STARTED.md) for Windows prerequisites, Microsoft 365
 setup, printer/device configuration, repair/upgrade/uninstall, and current limitations. See the
-[RC1 release notes](docs/release/RELEASE-NOTES-1.0.0-rc.1.md) for the exact pre-release status.
+[RC1 release notes](docs/release/RELEASE-NOTES-1.0.0-rc.1.md) for the exact pre-release status and
+the public [administrator documentation](https://getrelaybridge.com/docs/) for deployment guidance.
 
 ## Architecture
 

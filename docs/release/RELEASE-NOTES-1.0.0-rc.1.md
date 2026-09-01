@@ -73,7 +73,9 @@ repair/upgrade/uninstall, and troubleshooting guidance.
   SHA-256 checksums.
 
 The release provenance records the exact source revision, and the final release-preparation report
-records the current verification totals. Corresponding MPL-2.0 source will be available at the exact
-`v1.0.0-rc.1` release tag when RC1 is published.
+records the verification totals. Corresponding MPL-2.0 source is available at the exact public
+[`v1.0.0-rc.1` source tag](https://github.com/getrelaybridge/relaybridge/tree/v1.0.0-rc.1), and the
+release is available on the public
+[`v1.0.0-rc.1` release page](https://github.com/getrelaybridge/relaybridge/releases/tag/v1.0.0-rc.1).
 
 RelayBridge is an independent project and is not affiliated with or endorsed by Microsoft.
