@@ -10,12 +10,13 @@ prompt or a substitute for current implementation evidence.
 is implemented and verified at the current revision. At present:
 
 - Milestone 9 product hardening is frozen.
-- Milestone 10 is preparing the unsigned `v1.0.0-rc.1` public evaluation candidate.
+- Milestone 10 produced the public unsigned `v1.0.0-rc.1` evaluation/community-testing pre-release.
 - RelayBridge source is public under MPL-2.0.
-- Official Windows binaries have not been released.
+- The RC1 Windows binaries and exact corresponding source tag are public.
+- A signed stable `v1.0.0` release is not available; SignPath has not been started or approved.
 
 The milestone sections below preserve the incremental product plan. They do not authorize
-re-running completed milestones or publishing binaries outside the explicit M10 release workflow.
+re-running completed milestones or treating development artifacts as releases.
 Contributors and coding agents must follow `AGENTS.md` and `CONTRIBUTING.md`.
 
 RelayBridge should remain a **small, understandable, secure, reliable, high-performance production
@@ -2553,8 +2554,8 @@ understandable
 runnable
 ```
 
-Milestones 0 through 9 are implemented historical boundaries; M9 is frozen and M10 release-
-candidate preparation is in progress. The individual milestone documents and `BUILD_STATUS.md`
+Milestones 0 through 9 are implemented historical boundaries; M9 is frozen and M10 produced the
+public unsigned RC1 pre-release. The individual milestone documents and `BUILD_STATUS.md`
 supersede the original planning language below when recording actual implementation or
 verification status.
 
@@ -3193,9 +3194,10 @@ The goal is:
 
 # 115. Current Work Boundary
 
-Milestone 9 is frozen and M10 is limited to release-candidate documentation, reproducible packaging,
-and finite validation. Do not reopen completed milestone architecture without a concrete reproduced
-defect, and do not publish or describe development artifacts as official Windows releases.
+Milestone 9 is frozen and M10 completed the documented, reproducible, finite-validation path for
+the public unsigned RC1. No RC2 or stable `v1.0.0` work is active. Do not reopen completed milestone
+architecture without a concrete reproduced defect, and do not publish or describe development
+artifacts as official Windows releases.
 
 For every requested change, inspect the current repository, use the smallest coherent scope, run
 the relevant Release build/tests and repository verifiers, update `BUILD_STATUS.md` when project

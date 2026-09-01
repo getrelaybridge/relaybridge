@@ -4,8 +4,15 @@ All notable changes will be documented here.
 
 ## Unreleased
 
-- M10 prepares the unsigned `v1.0.0-rc.1` public evaluation candidate without creating the tag or
-  release. It adds the RC warning and administrator guides, versioned release notes, a selectable
+- CI secret scanning now invokes checksum-verified Gitleaks CLI 8.30.1 directly over full fetched
+  reachable history, avoiding the organization-license requirement of the former Action wrapper.
+  This post-tag infrastructure correction does not change the RC1 source or package.
+
+## 1.0.0-rc.1 - 2026-08-31
+
+- Published the first unsigned public pre-release for evaluation and community testing from the
+  immutable `v1.0.0-rc.1` source tag after release gates and owner smoke passed.
+- M10 prepared the RC warning and administrator guides, versioned release notes, a selectable
   external artifact root, an exact public release allowlist, path-free source/package provenance,
   and deterministic SHA-256 checksums. Product, protocol, Microsoft, queue, and security behavior
   are unchanged.

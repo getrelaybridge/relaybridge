@@ -132,8 +132,7 @@ package metadata before protected extraction.
 - MICROSOFT GRAPH MISSING `license.txt` CLARIFICATION — OPEN.
 - PUBLIC RELEASE SIGNING GATE — OPEN.
 
-M10 is preparing one explicitly unsigned public RC1 for evaluation/community testing; it does not
-close or reinterpret these external questions. RC1 publication still requires the exact source
-tag, completed package gates, owner smoke approval, and a separate release task. The later signed
+The public `v1.0.0-rc.1` release is explicitly unsigned and intended for evaluation/community
+testing. Its publication does not close or reinterpret these external questions. The later signed
 stable production release remains prohibited until its applicable release gates close with
 evidence.
